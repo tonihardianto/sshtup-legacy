@@ -1,0 +1,311 @@
+//! Host side of a shared terminal: connects to the relay that runs inside the sync server,
+//! forwards what the terminal prints (sealed end to end, the relay never holds the key),
+//! tells the guest list, and writes allowed guest keystrokes into the terminal.
+
+use crate::term::Shared;
+use crate::wire::{new_key, open, read_msg, seal, send, share_string, text, Dir};
+use eframe::egui;
+use serde_json::{json, Value};
+use std::io::{BufReader, Write};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Status {
+    Connecting,
+    Live,
+    Failed,
+}
+
+pub struct LinkState {
+    pub status: Status,
+    pub code: String,
+    pub guests: Vec<(u64, String)>,
+    pub can_type: bool,
+    pub error: String,
+}
+
+/// What the link's own thread needs. It must not own the `Guard`: the guard's `Drop` is what
+/// ends the session when the last `HostLink` goes away, and a thread holding it would keep it alive forever.
+struct Inner {
+    ctl: Mutex<Option<Sender<Value>>>,
+    stopped: AtomicBool,
+}
+
+struct Guard {
+    inner: Arc<Inner>,
+    shared: Arc<Shared>,
+}
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        self.inner.stopped.store(true, Ordering::SeqCst);
+        if let Ok(mut t) = self.shared.tap.lock() {
+            *t = None;
+        }
+        if let Some(c) = self.inner.ctl.lock().unwrap().as_ref() {
+            let _ = c.send(json!({"t":"end"}));
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct HostLink {
+    pub state: Arc<Mutex<LinkState>>,
+    guard: Arc<Guard>,
+}
+
+impl HostLink {
+    pub fn set_can_type(&self, on: bool) {
+        self.state.lock().unwrap().can_type = on;
+        if let Some(c) = self.guard.inner.ctl.lock().unwrap().as_ref() {
+            let _ = c.send(json!({"t":"perm","can_type":on}));
+        }
+    }
+}
+
+fn fail(state: &Arc<Mutex<LinkState>>, ctx: &egui::Context, msg: &str) {
+    let mut s = state.lock().unwrap();
+    s.status = Status::Failed;
+    s.error = msg.to_string();
+    ctx.request_repaint();
+}
+
+pub fn start_host(
+    server: String,
+    token: String,
+    parser: Arc<Mutex<vt100::Parser>>,
+    pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    shared: Arc<Shared>,
+    ctx: egui::Context,
+) -> HostLink {
+    let state = Arc::new(Mutex::new(LinkState { status: Status::Connecting, code: String::new(), guests: vec![], can_type: false, error: String::new() }));
+    let inner = Arc::new(Inner { ctl: Mutex::new(None), stopped: AtomicBool::new(false) });
+    let guard = Arc::new(Guard { inner: inner.clone(), shared: shared.clone() });
+    let link = HostLink { state: state.clone(), guard };
+    std::thread::spawn(move || {
+        // sign in to the relay with a one-time ticket from the sync server
+        let pass = match sync_client::api::Api::new(&server, Some(token)).relay_pass() {
+            Ok(p) => p,
+            Err(e) => return fail(&state, &ctx, &crate::sync::runtime::describe(&e)),
+        };
+        let addr = pass.addr;
+        let key = new_key();
+        let stream = addr
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.find_map(|a| TcpStream::connect_timeout(&a, Duration::from_secs(8)).ok()));
+        let Some(stream) = stream else {
+            return fail(&state, &ctx, "Could not reach the relay");
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+        let Ok(mut w) = stream.try_clone() else { return fail(&state, &ctx, "Connection failed") };
+        let mut r = BufReader::new(stream);
+        if send(&mut w, &json!({"t":"host","ticket":pass.ticket})).is_err() {
+            return fail(&state, &ctx, "Connection lost");
+        }
+        let code = match read_msg(&mut r) {
+            Some(m) if text(&m, "t") == "hosted" => share_string(text(&m, "code"), &key),
+            Some(m) => return fail(&state, &ctx, if text(&m, "msg").is_empty() { "Relay refused" } else { text(&m, "msg") }),
+            None => return fail(&state, &ctx, "The relay did not answer"),
+        };
+        let _ = r.get_ref().set_read_timeout(None);
+        if inner.stopped.load(Ordering::SeqCst) {
+            let _ = send(&mut w, &json!({"t":"end"}));
+            return;
+        }
+        let (otx, orx) = channel::<Value>();
+        let (ttx, trx) = channel::<Vec<u8>>();
+        *inner.ctl.lock().unwrap() = Some(otx.clone());
+        *shared.tap.lock().unwrap() = Some(ttx);
+        {
+            let mut s = state.lock().unwrap();
+            s.status = Status::Live;
+            s.code = code;
+        }
+        ctx.request_repaint();
+        // terminal output -> relay
+        let o2 = otx.clone();
+        std::thread::spawn(move || {
+            for chunk in trx {
+                if o2.send(json!({"t":"out","d":seal(&key, Dir::Out, &chunk)})).is_err() {
+                    break;
+                }
+            }
+        });
+        // everything outgoing -> socket
+        std::thread::spawn(move || {
+            for v in orx {
+                let end = v.get("t").and_then(|x| x.as_str()) == Some("end");
+                if send(&mut w, &v).is_err() || end {
+                    break;
+                }
+            }
+            let _ = w.shutdown(Shutdown::Both);
+        });
+        // relay -> us
+        while let Some(m) = read_msg(&mut r) {
+            match text(&m, "t") {
+                "guest" => {
+                    let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
+                    let snap = parser.lock().map(|p| p.screen().contents_formatted()).unwrap_or_default();
+                    let _ = otx.send(json!({"t":"snap","gid":gid,"d":seal(&key, Dir::Out, snap.as_bytes())}));
+                    state.lock().unwrap().guests.push((gid, text(&m, "name").to_string()));
+                }
+                "left" => {
+                    let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
+                    state.lock().unwrap().guests.retain(|g| g.0 != gid);
+                }
+                "in" => {
+                    if state.lock().unwrap().can_type {
+                        // a chunk that does not open with the session key is not from a guest who has it
+                        if let (Some(keys), Ok(mut pw)) = (open(&key, Dir::In, text(&m, "d")), pty_writer.lock()) {
+                            let _ = pw.write_all(&keys);
+                            let _ = pw.flush();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            ctx.request_repaint();
+        }
+        if !inner.stopped.load(Ordering::SeqCst) {
+            fail(&state, &ctx, "The relay closed the connection");
+        }
+        if let Ok(mut t) = shared.tap.lock() {
+            *t = None;
+        }
+    });
+    link
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    fn account(base: &str, db: &sync_server::db::Db, email: &str) -> String {
+        sync_client::account::register(&sync_client::api::Api::new(base, None), email, "a long enough password", &sync_server::create_invite(db)).unwrap();
+        sync_client::account::login(&sync_client::api::Api::new(base, None), email, "a long enough password", "d").unwrap().token
+    }
+
+    fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
+        let t = Instant::now();
+        while !ok() {
+            assert!(t.elapsed() < Duration::from_secs(20), "timed out waiting for: {what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The real host code, the real relay inside the sync server and the real guest program, with two accounts.
+    #[test]
+    fn a_guest_with_an_account_sees_and_types_into_the_hosts_terminal() {
+        // the guest is this same program run in join mode; `cargo build --bin sshtup` makes it
+        let guest_exe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("target/debug/sshtup{}", std::env::consts::EXE_SUFFIX));
+        assert!(guest_exe.exists(), "build the program first: cargo build --bin sshtup ({} is missing)", guest_exe.display());
+        let db = sync_server::db::Db::memory().unwrap();
+        let base = sync_server::spawn_server_relay(db.clone(), true);
+        let (host_tok, guest_tok) = (account(&base, &db, "host@x.io"), account(&base, &db, "guest@x.io"));
+        share_and_join(&base, host_tok, guest_tok);
+    }
+
+    /// The same walk-through against a real, deployed server (one account may be host and guest at once).
+    /// TC_SERVER=https://… TC_EMAIL=… TC_PASSWORD=… [TC_INVITE=code to register first]
+    /// cargo test --bin sshtup against_a_real_server -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn against_a_real_server() {
+        let env = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+        let (server, email, pw) = (env("TC_SERVER"), env("TC_EMAIL"), env("TC_PASSWORD"));
+        let api = sync_client::api::Api::new(&server, None);
+        if let Ok(code) = std::env::var("TC_INVITE") {
+            sync_client::account::register(&api, &email, &pw, &code).expect("register");
+            println!("registered {email}");
+        }
+        let tok = sync_client::account::login(&api, &email, &pw, "relay-test").expect("login").token;
+        share_and_join(&server, tok.clone(), tok);
+        println!("host, relay and guest all worked through {server}");
+    }
+
+    fn share_and_join(base: &str, host_tok: String, guest_tok: String) {
+        let guest_exe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("target/debug/sshtup{}", std::env::consts::EXE_SUFFIX));
+        let base = base.to_string();
+        // the host's terminal: a screen, a place where typed bytes land, and the output tap
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(std::num::NonZeroU16::new(24).unwrap(), std::num::NonZeroU16::new(80).unwrap(), 0)));
+        parser.lock().unwrap().process(b"already on screen");
+        let typed = Arc::new(Mutex::new(Vec::<u8>::new()));
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+        impl Write for Sink {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(Sink(typed.clone()))));
+        let shared = Arc::new(Shared {
+            prompt: Mutex::new(None),
+            answered_at: Mutex::new(None),
+            login_seen: Mutex::new(None),
+            alive: AtomicBool::new(true),
+            bytes: std::sync::atomic::AtomicUsize::new(0),
+            bell: std::sync::atomic::AtomicU64::new(0),
+            last_output: Mutex::new(Instant::now()),
+            exit_code: Mutex::new(None),
+            tap: Mutex::new(None),
+        });
+        let link = start_host(base.clone(), host_tok, parser, writer, shared.clone(), egui::Context::default());
+        wait_for("the host to go live", || link.state.lock().unwrap().status != Status::Connecting);
+        let st = link.state.lock().unwrap();
+        assert_eq!(st.status, Status::Live, "{}", st.error);
+        let share = st.code.clone();
+        drop(st);
+        assert!(share.contains('~'), "the code carries the key: {share}");
+
+        // the guest: its own account, its own ticket, the real program
+        let pass = sync_client::api::Api::new(&base, Some(guest_tok)).relay_pass().unwrap();
+        let mut guest = Command::new(&guest_exe).args(["--relay-join", &pass.addr, &share, "ann", &pass.ticket]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let (seen2, mut out) = (seen.clone(), guest.stdout.take().unwrap());
+        std::thread::spawn(move || {
+            let mut b = [0u8; 4096];
+            while let Ok(n) = out.read(&mut b) {
+                if n == 0 {
+                    break;
+                }
+                seen2.lock().unwrap().extend_from_slice(&b[..n]);
+            }
+        });
+        let shows = |s: &str| String::from_utf8_lossy(&seen.lock().unwrap()).contains(s);
+
+        wait_for("the guest to see the screen that was already there", || shows("already on screen"));
+        wait_for("the host to list the guest", || link.state.lock().unwrap().guests.iter().any(|g| g.1 == "ann"));
+        shared.tap.lock().unwrap().as_ref().unwrap().send(b"LIVE-OUTPUT".to_vec()).unwrap();
+        wait_for("live output on the guest", || shows("LIVE-OUTPUT"));
+
+        // view only: keystrokes go nowhere
+        let mut keys = guest.stdin.take().unwrap();
+        keys.write_all(b"nope").unwrap();
+        keys.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+        assert!(typed.lock().unwrap().is_empty(), "a guest cannot type until the host allows it");
+        // allowed: they arrive
+        link.set_can_type(true);
+        std::thread::sleep(Duration::from_millis(300));
+        keys.write_all(b"ls\n").unwrap();
+        keys.flush().unwrap();
+        wait_for("typed bytes at the host", || typed.lock().unwrap().ends_with(b"ls\n"));
+
+        // the host stops sharing: the guest is told and leaves
+        drop(link);
+        wait_for("the guest to be told", || shows("The host ended the session"));
+        wait_for("the guest program to exit", || guest.try_wait().unwrap().is_some());
+    }
+}

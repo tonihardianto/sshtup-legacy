@@ -1,0 +1,6 @@
+/target
+.DS_Store
+.superpowers/
+*.db
+shots/
+docs/superpowers/

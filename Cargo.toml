@@ -1,0 +1,35 @@
+[workspace]
+members = [".", "sync-core", "sync-server", "sync-client"]
+resolver = "2"
+
+[package]
+name = "sshtup"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+eframe = "0.37.0"
+getrandom = "0.2"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+portable-pty = "0.9.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+vt100 = "0.18.1"
+winit = "0.30.13"
+zeroize = "1"
+sha2 = "0.10"
+base64 = "0.22"
+sync-core = { path = "sync-core" }
+sync-client = { path = "sync-client" }
+
+# Argon2 is slow without optimisation; keep it fast in debug builds too.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+
+[dev-dependencies]
+sync-server = { path = "sync-server" }
