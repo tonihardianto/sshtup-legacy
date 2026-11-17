@@ -6,6 +6,7 @@ mod collab_net;
 mod hostcard;
 mod icons;
 mod lock;
+mod lucide_data;
 mod model;
 mod relay_join;
 mod typing_osc;

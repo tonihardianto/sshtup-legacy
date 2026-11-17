@@ -556,6 +556,8 @@ impl App {
             }
             egui::Popup::menu(&arrow.on_hover_cursor(egui::CursorIcon::PointingHand)).show(|ui| {
                 ui.set_min_width(190.0);
+                ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
                 let entries = [
                     ("New Group", HAct::NewGroup),
                     ("Import ~/.ssh/config", HAct::ImportConfig),
