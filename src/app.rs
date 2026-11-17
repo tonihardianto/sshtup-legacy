@@ -653,7 +653,8 @@ impl App {
                         let (c, x, resp) = tab_button_with(ui, &title, self.active == Some(id), true, Some(dot), None, &people);
                         let act = std::cell::Cell::new(crate::collab::CollabAct::None);
                         let sh = self.collab.shares.iter().find(|s| s.tab_id == id).cloned();
-                        resp.context_menu(|ui| act.set(crate::collab::collab_items(ui, sh.as_ref())));
+                        let can_share = self.tabs.iter().find(|t| t.id == id).map(|t| !t.sess.spec.is_guest()).unwrap_or(true);
+                        resp.context_menu(|ui| act.set(crate::collab::collab_items(ui, sh.as_ref(), can_share)));
                         if act.get() != crate::collab::CollabAct::None {
                             collab_act = Some((id, act.get()));
                         }
@@ -761,6 +762,7 @@ impl App {
         let bell = self.tabs[idx].sess.shared.bell.load(std::sync::atomic::Ordering::Relaxed);
         let share = self.collab.shares.iter().find(|s| s.tab_id == tab_id).cloned();
         let people = self.people_of(tab_id);
+        let can_share = !self.tabs[idx].sess.spec.is_guest();
         let mut card_collab: Option<crate::collab::CollabAct> = None;
 
         Frame::new().fill(rgb_c(scheme.background)).show(ui, |ui| {
@@ -835,7 +837,7 @@ impl App {
             // (a hidden card still comes back when the connection is lost: it holds the Reconnect button)
             let corner = crate::card::Corner::from_setting(&s.card_position);
             if !covered && (corner.is_some() || !alive) {
-                let c = crate::card::CardIn { corner: corner.unwrap_or(crate::card::Corner::TopRight), tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people };
+                let c = crate::card::CardIn { corner: corner.unwrap_or(crate::card::Corner::TopRight), tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people, can_share };
                 let a = crate::card::session_card(ui.ctx(), area, &mut tab.card_pinned, &c);
                 if a.disconnect {
                     tab.sess.kill();

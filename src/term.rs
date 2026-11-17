@@ -31,6 +31,13 @@ pub struct SessionSpec {
     pub refused: Option<String>,
 }
 
+impl SessionSpec {
+    /// A guest's tab of someone else's shared terminal (it runs our own `--relay-join` helper).
+    pub fn is_guest(&self) -> bool {
+        self.args.first().map(|a| a == "--relay-join").unwrap_or(false)
+    }
+}
+
 /// The host asked for a password or key passphrase that is not saved (or was wrong).
 #[derive(Clone, Copy, Debug)]
 pub struct AuthPrompt {
@@ -98,7 +105,7 @@ impl PtySession {
         cmd.env("TERM", if spec.term_type.is_empty() { "xterm-256color" } else { &spec.term_type });
         cmd.env("COLORTERM", "truecolor");
         // a guest tab of a shared terminal learns who is typing from its own helper program (see typing_osc)
-        let typing_secret = (spec.args.first().map(|a| a == "--relay-join").unwrap_or(false)).then(crate::typing_osc::new_secret);
+        let typing_secret = spec.is_guest().then(crate::typing_osc::new_secret);
         if let Some(s) = &typing_secret {
             cmd.env("SSHTUP_TYPING_SECRET", s);
         }
@@ -1134,5 +1141,20 @@ mod log_tests {
         let (bytes, path) = run(None);
         assert!(String::from_utf8_lossy(&bytes).contains("visible-secret-output"));
         let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod guest_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_relay_join_tab_is_a_guest_tab() {
+        let mut s = SessionSpec::default();
+        assert!(!s.is_guest());
+        s.args = vec!["-l".into()];
+        assert!(!s.is_guest());
+        s.args = vec!["--relay-join".into(), "addr".into()];
+        assert!(s.is_guest());
     }
 }
