@@ -154,6 +154,9 @@ impl PtySession {
                 let mut seen = [0u32; 2];
                 let mut denied = false;
                 let mut authed = false;
+                // output that looks like the start of a session (after a quiet spell following an answer); it only
+                // counts once more output or a prompt shows up a moment later, because a refusal can arrive in pieces
+                let mut login_guess: Option<Instant> = None;
                 let begun = Instant::now();
                 let mut log = log_path.as_ref().and_then(|p| crate::vaultcrypt::LogSink::create(p, log_key.as_ref()));
                 loop {
@@ -201,6 +204,9 @@ impl PtySession {
                                     let saved = if is_pp { passphrase.clone() } else { password.clone() };
                                     let done = if is_pp { &mut auto_pp } else { &mut auto_pw };
                                     let pending = shared.prompt.lock().map(|p| p.is_some()).unwrap_or(false);
+                                    if !denied && login_guess.map(|g| g.elapsed() > Duration::from_secs(1)).unwrap_or(false) {
+                                        authed = true;
+                                    }
                                     if let (Some(r), false) = (saved, *done) {
                                         // saved secret: answer once
                                         *done = true;
@@ -226,6 +232,7 @@ impl PtySession {
                                     let pending = shared.prompt.lock().map(|p| p.is_some()).unwrap_or(false);
                                     let answered = *shared.answered_at.lock().unwrap();
                                     if denied {
+                                        login_guess = None;
                                         *shared.login_seen.lock().unwrap() = None;
                                     } else if !pending && answered.is_some() && chunk.iter().any(|b| !b.is_ascii_whitespace()) {
                                         let mut ls = shared.login_seen.lock().unwrap();
@@ -236,7 +243,13 @@ impl PtySession {
                                     // a refusal that arrives late (hosts delay it) must never count as a login
                                     if !pending && !authed && !denied {
                                         let quiet_after_answer = answered.map(|a| a.elapsed() > Duration::from_secs(3)).unwrap_or(false);
-                                        if quiet_after_answer || (answered.is_none() && seen == [0, 0] && begun.elapsed() > Duration::from_secs(45)) {
+                                        if quiet_after_answer && chunk.iter().any(|b| !b.is_ascii_whitespace()) {
+                                            match login_guess {
+                                                None => login_guess = Some(Instant::now()),
+                                                Some(g) if g.elapsed() > Duration::from_secs(1) => authed = true,
+                                                Some(_) => {}
+                                            }
+                                        } else if answered.is_none() && seen == [0, 0] && begun.elapsed() > Duration::from_secs(45) {
                                             authed = true;
                                         }
                                     }
@@ -997,6 +1010,32 @@ mod auth_tests {
         assert!(s.shared.login_seen.lock().unwrap().is_some());
         let text = s.parser.lock().unwrap().screen().contents();
         assert!(text.contains("got:good"), "{text}");
+    }
+
+    #[test]
+    fn a_refusal_that_arrives_in_pieces_is_still_a_refusal() {
+        // the host is quiet for 3.5 s, then the refusal comes in two reads: a bare line break first
+        // (a terminal flushes line by line), the rest a moment later. The first piece must not be
+        // taken for the start of a session.
+        let script = "printf \"me@host's password: \"; read -r a; sleep 3.5; printf '\\r\\n'; sleep 0.4; printf 'Permission denied, please try again.\\r\\n'; sleep 0.3; printf 'me@host password: '; read -r b; echo got:$b";
+        let s = PtySession::spawn(spec(script), egui::Context::default(), 24, 80).unwrap();
+        assert!(wait_prompt(&s).is_some(), "first prompt");
+        s.submit_auth("bad");
+        let p = wait_long(&s, 100).expect("second prompt after a refusal that came in pieces");
+        assert!(p.wrong);
+        assert!(s.shared.login_seen.lock().unwrap().is_none(), "a refusal is never taken for a login");
+    }
+
+    #[test]
+    fn a_later_sudo_prompt_after_a_login_does_not_open_the_window() {
+        // the login works after a quiet spell, and a password prompt of a program inside the session comes later
+        let script = "printf \"me@host's password: \"; read -r a; sleep 3.4; echo Welcome; sleep 1.4; printf '[sudo] password for me: '; read -r c; echo got:$c";
+        let s = PtySession::spawn(spec(script), egui::Context::default(), 24, 80).unwrap();
+        assert!(wait_prompt(&s).is_some(), "first prompt");
+        s.submit_auth("good");
+        std::thread::sleep(Duration::from_millis(6500));
+        assert!(s.parser.lock().unwrap().screen().contents().contains("[sudo] password"), "the sudo prompt did arrive");
+        assert!(s.auth_prompt().is_none(), "a prompt from inside the session is not the login");
     }
 
     fn wait_long(s: &PtySession, tries: u32) -> Option<AuthPrompt> {
