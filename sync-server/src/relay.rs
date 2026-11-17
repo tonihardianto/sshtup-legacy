@@ -256,9 +256,9 @@ fn host(reader: &mut BufReader<TcpStream>, tx: SyncSender<Value>, sessions: &Ses
                 let msg = json!({"t":"out","d":text(&m,"d")});
                 s.guests.retain(|g| !g.active || g.tx.try_send(msg.clone()).is_ok());
             }
-            "typing" => {
-                // sealed by the host: who just typed, for the other windows to show
-                let msg = json!({"t":"typing","d":text(&m,"d")});
+            kind @ ("typing" | "roster") => {
+                // sealed by the host: who just typed / who is in the session, for the guests' windows to show
+                let msg = json!({"t":kind,"d":text(&m,"d")});
                 s.guests.retain(|g| !g.active || g.tx.try_send(msg.clone()).is_ok());
             }
             "snap" => {

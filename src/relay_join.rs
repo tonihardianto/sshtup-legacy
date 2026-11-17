@@ -63,14 +63,12 @@ pub fn run(addr: &str, share: &str, name: &str, ticket: &str) -> i32 {
                     let _ = out.flush();
                 }
             }
-            "typing" => {
+            kind @ ("typing" | "roster") => {
+                // sealed by the host: who just typed / who is in the session, for the app that owns this tab to draw
                 if let (Some(secret), Some(raw)) = (secret.as_deref(), open(&key, Dir::Out, text(&m, "d"))) {
-                    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw) {
-                        let c = v.get("c").and_then(|c| c.as_array()).map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect::<Vec<_>>()).unwrap_or_default();
-                        if let (Some(name), [r, g, b]) = (v.get("n").and_then(|n| n.as_str()), c.as_slice()) {
-                            let _ = out.write_all(&crate::typing_osc::emit(secret, name, [*r, *g, *b]));
-                            let _ = out.flush();
-                        }
+                    if let Some(report) = crate::typing_osc::decode(if kind == "typing" { "t" } else { "r" }, &raw) {
+                        let _ = out.write_all(&crate::typing_osc::emit(secret, &report));
+                        let _ = out.flush();
                     }
                 }
             }

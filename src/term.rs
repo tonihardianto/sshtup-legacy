@@ -55,6 +55,8 @@ pub struct Shared {
     pub tap: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
     /// Who of the guests of a shared terminal typed last, shown under the cursor for a moment.
     pub typing: Mutex<Option<Typing>>,
+    /// In a guest tab: who is in the session (the host first), as the host last said.
+    pub people: Mutex<Vec<(String, [u8; 3])>>,
 }
 
 /// A guest's keystroke seen by the host: shown as a small badge under the cursor.
@@ -122,6 +124,7 @@ impl PtySession {
             exit_code: Mutex::new(None),
             tap: Mutex::new(None),
             typing: Mutex::new(None),
+            people: Mutex::new(Vec::new()),
             prompt: Mutex::new(None),
             answered_at: Mutex::new(None),
             login_seen: Mutex::new(None),
@@ -173,9 +176,18 @@ impl PtySession {
                             let chunk: &[u8] = match typing_scan.as_mut() {
                                 Some(scan) => {
                                     let (clean, seen) = scan.feed(&buf[..n]);
-                                    if let Some(s) = seen.into_iter().last() {
-                                        if let Ok(mut t) = shared.typing.lock() {
-                                            *t = Some(Typing { name: s.name, color: s.color, at: Instant::now() });
+                                    for report in seen {
+                                        match report {
+                                            crate::typing_osc::Report::Typing(p) => {
+                                                if let Ok(mut t) = shared.typing.lock() {
+                                                    *t = Some(Typing { name: p.name, color: p.color, at: Instant::now() });
+                                                }
+                                            }
+                                            crate::typing_osc::Report::People(v) => {
+                                                if let Ok(mut r) = shared.people.lock() {
+                                                    *r = v.into_iter().map(|p| (p.name, p.color)).collect();
+                                                }
+                                            }
                                         }
                                     }
                                     scanned = clean;

@@ -5,16 +5,33 @@
 //! removes it from the screen and shows the badge. The sequence carries a random per-tab secret, so text printed by
 //! the host's terminal (which also reaches this output) cannot make a badge appear.
 //!
-//!     ESC ] 7733 ; <secret> ; <name as hex> ; <rrggbb> BEL
+//!     ESC ] 7733 ; <secret> ; <kind> ; <json as hex> BEL
+//!
+//! `t` is "who just typed" (`{"n":name,"c":[r,g,b]}`), `r` the people in the session (a list of the same).
 
 use sync_core::relaywire::{hex, unhex};
 
 const PREFIX: &[u8] = b"\x1b]7733;";
 /// A sequence longer than this is not ours (names are short); it is passed through as plain text.
-const MAX_LEN: usize = 160;
+const MAX_LEN: usize = 1500;
 
-pub fn emit(secret: &str, name: &str, color: [u8; 3]) -> Vec<u8> {
-    format!("\x1b]7733;{secret};{};{:02x}{:02x}{:02x}\x07", hex(name.as_bytes()), color[0], color[1], color[2]).into_bytes()
+pub fn emit(secret: &str, report: &Report) -> Vec<u8> {
+    let (kind, json) = match report {
+        Report::Typing(p) => ('t', serde_json::to_string(&json_person(p))),
+        Report::People(v) => ('r', serde_json::to_string(&v.iter().map(json_person).collect::<Vec<_>>())),
+    };
+    format!("\x1b]7733;{secret};{kind};{}\x07", hex(json.unwrap_or_default().as_bytes())).into_bytes()
+}
+
+fn json_person(p: &Person) -> serde_json::Value {
+    serde_json::json!({"n": p.name, "c": p.color})
+}
+
+fn person(v: &serde_json::Value) -> Option<Person> {
+    let c = v.get("c")?.as_array()?;
+    let rgb: Vec<u8> = c.iter().map(|x| x.as_u64().unwrap_or(0).min(255) as u8).collect();
+    let [r, g, b] = rgb.as_slice() else { return None };
+    Some(Person { name: sync_core::relaywire::clean_name(v.get("n")?.as_str()?), color: [*r, *g, *b] })
 }
 
 pub fn new_secret() -> String {
@@ -23,10 +40,18 @@ pub fn new_secret() -> String {
     hex(&b)
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Seen {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Person {
     pub name: String,
     pub color: [u8; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Report {
+    /// This person just typed.
+    Typing(Person),
+    /// Everyone in the session, the host first.
+    People(Vec<Person>),
 }
 
 /// Takes the sequences out of the bytes a pty prints. Holds back a sequence that is cut between two reads.
@@ -41,7 +66,7 @@ impl Scan {
     }
 
     /// The bytes to show, and the typing reports that were in them.
-    pub fn feed(&mut self, chunk: &[u8]) -> (Vec<u8>, Vec<Seen>) {
+    pub fn feed(&mut self, chunk: &[u8]) -> (Vec<u8>, Vec<Report>) {
         let mut data = std::mem::take(&mut self.pending);
         data.extend_from_slice(chunk);
         let mut out = Vec::with_capacity(data.len());
@@ -84,19 +109,24 @@ impl Scan {
         (out, seen)
     }
 
-    fn parse(&self, body: &[u8]) -> Option<Seen> {
+    fn parse(&self, body: &[u8]) -> Option<Report> {
         let body = std::str::from_utf8(body).ok()?;
         let mut it = body.split(';');
-        let (secret, name, color) = (it.next()?, it.next()?, it.next()?);
-        if it.next().is_some() || secret != self.secret || color.len() != 6 {
+        let (secret, kind, data) = (it.next()?, it.next()?, it.next()?);
+        if it.next().is_some() || secret != self.secret {
             return None;
         }
-        let c = unhex(color);
-        if c.len() != 3 {
-            return None;
-        }
-        let name = sync_core::relaywire::clean_name(&String::from_utf8_lossy(&unhex(name)));
-        Some(Seen { name, color: [c[0], c[1], c[2]] })
+        decode(kind, &unhex(data))
+    }
+}
+
+/// A report from its kind ("t" or "r") and its JSON.
+pub fn decode(kind: &str, json: &[u8]) -> Option<Report> {
+    let v: serde_json::Value = serde_json::from_slice(json).ok()?;
+    match kind {
+        "t" => person(&v).map(Report::Typing),
+        "r" => Some(Report::People(v.as_array()?.iter().filter_map(person).take(8).collect())),
+        _ => None,
     }
 }
 
@@ -108,20 +138,24 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
 
+    fn ann(color: [u8; 3]) -> Person {
+        Person { name: "Ann".into(), color }
+    }
+
     #[test]
     fn a_report_is_taken_out_of_the_text() {
         let mut s = Scan::new("sec".into());
         let mut input = b"before".to_vec();
-        input.extend(emit("sec", "Ann", [1, 2, 255]));
+        input.extend(emit("sec", &Report::Typing(ann([1, 2, 255]))));
         input.extend(b"after");
         let (out, seen) = s.feed(&input);
         assert_eq!(out, b"beforeafter");
-        assert_eq!(seen, vec![Seen { name: "Ann".into(), color: [1, 2, 255] }]);
+        assert_eq!(seen, vec![Report::Typing(ann([1, 2, 255]))]);
     }
 
     #[test]
     fn a_report_cut_between_reads_is_still_found() {
-        let whole = emit("sec", "Ann", [9, 8, 7]);
+        let whole = emit("sec", &Report::People(vec![ann([9, 8, 7]), ann([1, 1, 1])]));
         for cut in 1..whole.len() {
             let mut s = Scan::new("sec".into());
             let (mut out, mut seen) = s.feed(&whole[..cut]);
@@ -134,9 +168,18 @@ mod tests {
     }
 
     #[test]
+    fn the_list_of_people_arrives_whole() {
+        let mut s = Scan::new("sec".into());
+        let all = Report::People(vec![ann([1, 2, 3]), Person { name: "Bo".into(), color: [4, 5, 6] }]);
+        let (out, seen) = s.feed(&emit("sec", &all));
+        assert!(out.is_empty());
+        assert_eq!(seen, vec![all]);
+    }
+
+    #[test]
     fn a_report_without_the_secret_is_dropped_and_shows_nothing() {
         let mut s = Scan::new("sec".into());
-        let (out, seen) = s.feed(&emit("guess", "Eve", [0, 0, 0]));
+        let (out, seen) = s.feed(&emit("guess", &Report::Typing(ann([0, 0, 0]))));
         assert!(out.is_empty());
         assert!(seen.is_empty());
     }
@@ -157,10 +200,10 @@ mod tests {
     fn an_unfinished_sequence_never_swallows_the_screen() {
         let mut s = Scan::new("sec".into());
         let mut input = PREFIX.to_vec();
-        input.extend(vec![b'x'; 400]);
+        input.extend(vec![b'x'; 3000]);
         let (out, _) = s.feed(&input);
         let (rest, _) = s.feed(b"");
         assert_eq!(out.len() + rest.len() + s.pending.len(), input.len());
-        assert!(out.len() > 200, "the text came through");
+        assert!(out.len() > 1000,"the text came through");
     }
 }
