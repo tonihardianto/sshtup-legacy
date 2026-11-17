@@ -27,6 +27,9 @@ pub enum Icon {
     File,
     Users,
     Upload,
+    Copy,
+    Stop,
+    Power,
 }
 
 impl Icon {
@@ -138,6 +141,17 @@ pub fn paint(p: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
             v.push((-0.6, 0.5));
             poly(&v, true);
             p.circle_stroke(pt(0.0, 0.85), 0.14 * h, st);
+        }
+        Icon::Copy => {
+            p.rect_stroke(Rect::from_min_max(pt(-0.35, -0.35), pt(0.85, 0.85)), 2.0, st, StrokeKind::Middle);
+            poly(&[(-0.35, 0.35), (-0.85, 0.35), (-0.85, -0.85), (0.35, -0.85), (0.35, -0.35)], false);
+        }
+        Icon::Stop => {
+            p.rect_stroke(Rect::from_min_max(pt(-0.7, -0.7), pt(0.7, 0.7)), 2.0, st, StrokeKind::Middle);
+        }
+        Icon::Power => {
+            poly(&arc(0.0, 0.1, 0.8, -PI * 0.3, PI * 1.3, 18), false);
+            line((0.0, -0.95), (0.0, 0.05));
         }
         Icon::Close => {
             line((-0.7, -0.7), (0.7, 0.7));
