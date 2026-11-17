@@ -1,4 +1,4 @@
-//! The small card that floats at the top right of a terminal. Folded, it shows only the
+//! The small card that floats in a corner of a terminal (top right unless Settings says otherwise). Folded, it shows only the
 //! connection dot (and the people, when the terminal is shared); it opens when the pointer is on
 //! it, when it is clicked, and by itself when the connection is lost. It replaces a toolbar row,
 //! so the terminal gets the whole height.
@@ -17,7 +17,39 @@ pub struct CardAct {
     pub collab: Option<CollabAct>,
 }
 
+/// Which corner of the terminal the card sits in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Corner {
+    TopRight,
+    TopLeft,
+    BottomRight,
+    BottomLeft,
+}
+
+/// The choices in Settings: the stored value and what the person reads.
+pub const POSITIONS: [(&str, &str); 5] = [
+    ("top-right", "Top right"),
+    ("top-left", "Top left"),
+    ("bottom-right", "Bottom right"),
+    ("bottom-left", "Bottom left"),
+    ("hidden", "Hidden"),
+];
+
+impl Corner {
+    /// The corner for a stored setting; `None` when the card is hidden. An unknown value counts as the default.
+    pub fn from_setting(s: &str) -> Option<Corner> {
+        match s {
+            "hidden" => None,
+            "top-left" => Some(Corner::TopLeft),
+            "bottom-right" => Some(Corner::BottomRight),
+            "bottom-left" => Some(Corner::BottomLeft),
+            _ => Some(Corner::TopRight),
+        }
+    }
+}
+
 pub struct CardIn<'a> {
+    pub corner: Corner,
     pub tab_id: u64,
     pub alive: bool,
     pub bell: bool,
@@ -38,8 +70,18 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
 
     let resp = egui::Area::new(id)
         .order(egui::Order::Foreground)
-        .pivot(Align2::RIGHT_TOP)
-        .fixed_pos(Pos2::new(area.right() - 14.0, area.top() + 12.0))
+        .pivot(match c.corner {
+            Corner::TopRight => Align2::RIGHT_TOP,
+            Corner::TopLeft => Align2::LEFT_TOP,
+            Corner::BottomRight => Align2::RIGHT_BOTTOM,
+            Corner::BottomLeft => Align2::LEFT_BOTTOM,
+        })
+        .fixed_pos(match c.corner {
+            Corner::TopRight => Pos2::new(area.right() - 14.0, area.top() + 12.0),
+            Corner::TopLeft => Pos2::new(area.left() + 14.0, area.top() + 12.0),
+            Corner::BottomRight => Pos2::new(area.right() - 14.0, area.bottom() - 12.0),
+            Corner::BottomLeft => Pos2::new(area.left() + 14.0, area.bottom() - 12.0),
+        })
         .show(ctx, |ui| {
             Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(0x1D, 0x20, 0x33, 238))
@@ -105,4 +147,33 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
         });
     ctx.data_mut(|d| d.insert_temp(id, resp.response.rect));
     act
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_choice_in_settings_maps_to_a_corner_or_hidden() {
+        assert_eq!(Corner::from_setting("top-right"), Some(Corner::TopRight));
+        assert_eq!(Corner::from_setting("top-left"), Some(Corner::TopLeft));
+        assert_eq!(Corner::from_setting("bottom-right"), Some(Corner::BottomRight));
+        assert_eq!(Corner::from_setting("bottom-left"), Some(Corner::BottomLeft));
+        assert_eq!(Corner::from_setting("hidden"), None);
+        for (k, _) in POSITIONS {
+            assert!(k == "hidden" || Corner::from_setting(k).is_some());
+        }
+    }
+
+    #[test]
+    fn an_unknown_value_falls_back_to_the_default_corner() {
+        assert_eq!(Corner::from_setting(""), Some(Corner::TopRight));
+        assert_eq!(Corner::from_setting("middle"), Some(Corner::TopRight));
+    }
+
+    #[test]
+    fn settings_saved_before_this_option_still_load() {
+        let s: crate::model::Settings = serde_json::from_str(r#"{"font_size": 14.0}"#).unwrap();
+        assert_eq!(s.card_position, "top-right");
+    }
 }

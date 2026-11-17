@@ -91,7 +91,7 @@ pub enum CollabAct {
     OpenScreen,
 }
 
-/// The entries of a terminal's Collaboration menu (toolbar button or right-click on its tab).
+/// The entries of a terminal's Collaboration menu (the card on the terminal or right-click on its tab).
 pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>) -> CollabAct {
     let mut act = CollabAct::None;
     ui.set_min_width(200.0);
@@ -301,7 +301,7 @@ impl App {
             ui.add_space(6.0);
             section_title(ui, "SHARED TERMINALS");
             if tabs.is_empty() {
-                label_muted(ui, "Open a terminal from Hosts, then share it here or from its toolbar.");
+                label_muted(ui, "Open a terminal from Hosts, then share it here or from the card on the terminal.");
             }
             for (id, title) in &tabs {
                 let share = self.collab.shares.iter().find(|s| s.tab_id == *id).cloned();

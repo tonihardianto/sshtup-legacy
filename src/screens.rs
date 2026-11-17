@@ -1279,6 +1279,16 @@ impl App {
             setting_row(ui, "Bell sound", "Show a bell mark when a program rings the bell", |ui| {
                 ch |= toggle(ui, &mut s.bell_sound).changed();
             });
+            setting_row(ui, "Session card", "Where the small card with Snippets, Share and Disconnect sits on a terminal. Hidden removes it (it still appears when the connection drops)", |ui| {
+                let label = crate::card::POSITIONS.iter().find(|(k, _)| *k == s.card_position).map(|(_, l)| *l).unwrap_or("Top right");
+                egui::ComboBox::from_id_salt("card-position").width(140.0).selected_text(label).show_ui(ui, |ui| {
+                    for (k, l) in crate::card::POSITIONS {
+                        if ui.selectable_value(&mut s.card_position, k.to_string(), l).changed() {
+                            ch = true;
+                        }
+                    }
+                });
+            });
             }
             if tab == 1 {
             section_title(ui, "CONNECTION");
