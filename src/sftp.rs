@@ -189,6 +189,8 @@ enum SAct {
     Delete,
     ChangeHost,
     LeftLocal,
+    /// Close the connection(s) and go back to the host list.
+    Disconnect,
 }
 
 struct SAuth {
@@ -904,6 +906,7 @@ fn menu_items(ui: &mut egui::Ui, side: Side, lhost: bool, acts: &mut Vec<(Side, 
     let mut items: Vec<(&str, SAct)> = vec![(t, SAct::Transfer), ("New folder", SAct::NewFolder), ("Rename", SAct::Rename), ("Delete selected", SAct::Delete), ("Refresh", SAct::Refresh)];
     if side == Side::Remote {
         items.push(("Change host", SAct::ChangeHost));
+        items.push(("Disconnect", SAct::Disconnect));
     } else {
         items.push((if lhost { "Change host…" } else { "Connect to a host…" }, SAct::ChangeHost));
         if lhost {
@@ -1562,6 +1565,18 @@ impl App {
                     s.host = None;
                     s.cfg = None;
                 }
+            }
+            SAct::Disconnect => {
+                // the whole browser: the right host and a left host, if there is one
+                s.host = None;
+                s.cfg = None;
+                s.remote = Pane::default();
+                s.connect_started = None;
+                s.left_host = None;
+                s.lcfg = None;
+                s.local = Pane::default();
+                s.lconnect_started = None;
+                s.pick_left = false;
             }
             SAct::LeftLocal => {
                 s.left_host = None;
