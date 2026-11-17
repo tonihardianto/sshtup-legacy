@@ -56,7 +56,6 @@ pub struct HostCardIn<'a> {
     pub user: String,
     pub color: Color32,
     pub live: bool,
-    pub selected: bool,
     /// "Team X" when the host belongs to a team.
     pub team: String,
 }
@@ -112,14 +111,14 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
 pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
     let h = c.host;
     let size = Vec2::new(width, c.height());
-    let out = card(ui, size, c.selected);
+    let out = card(ui, size, false);
     let rect = out.rect;
     let p = ui.painter().clone();
     let mut act = CardAct::None;
     if out.resp.clicked() || (out.resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
         act = CardAct::Open;
     }
-    if c.live && !c.selected {
+    if c.live {
         p.rect_stroke(rect, 10.0, Stroke::new(1.0, GREEN.linear_multiply(0.55)), StrokeKind::Inside);
     }
     if out.resp.has_focus() {

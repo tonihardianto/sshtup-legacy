@@ -642,7 +642,7 @@ impl App {
             for h in hosts {
                 let color = h.group.and_then(|g| self.vault.groups.iter().find(|x| x.id == g)).map(|g| icon_color(&g.name)).unwrap_or_else(|| icon_color(&h.address));
                 let team = self.team_tag("host", h.id).trim().trim_start_matches('·').trim().to_string();
-                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), selected: self.selected == Some(h.id), team };
+                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), team };
                 match host_card(ui, w, &c) {
                     CardAct::None => {}
                     CardAct::Open => acts.push(HAct::Connect(h.id)),
@@ -759,7 +759,6 @@ impl App {
         for a in acts {
             match a {
                 HAct::Connect(id) => {
-                    self.selected = Some(id);
                     self.connect_host(id);
                 }
                 HAct::Sftp(id) => {
