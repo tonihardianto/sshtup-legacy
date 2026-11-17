@@ -31,6 +31,7 @@ pub enum Icon {
     Stop,
     Power,
     Sliders,
+    List,
 }
 
 impl Icon {
@@ -159,6 +160,12 @@ pub fn paint(p: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
             line((-0.15, -0.5), (0.9, -0.5));
             p.circle_stroke(pt(0.5, 0.5), 0.3 * h, st);
             line((0.15, 0.5), (-0.9, 0.5));
+        }
+        Icon::List => {
+            for y in [-0.6, 0.0, 0.6] {
+                line((-0.35, y), (0.95, y));
+                p.circle_filled(pt(-0.85, y), 0.07 * h, color);
+            }
         }
         Icon::Close => {
             line((-0.7, -0.7), (0.7, 0.7));
