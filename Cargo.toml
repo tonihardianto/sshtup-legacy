@@ -9,7 +9,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
-argon2 = "0.5"
+argon2 = "0.6"
 chacha20poly1305 = "0.10"
 eframe = "0.37.0"
 getrandom = "0.2"
