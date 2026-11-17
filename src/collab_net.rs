@@ -164,6 +164,7 @@ pub fn start_host(
             let _ = w.shutdown(Shutdown::Both);
         });
         // relay -> us
+        let mut last_told: Option<(u64, Instant)> = None;
         while let Some(m) = read_msg(&mut r) {
             match text(&m, "t") {
                 "guest" => {
@@ -186,8 +187,15 @@ pub fn start_host(
                         if let (Some(keys), Ok(mut pw)) = (open(&key, Dir::In, text(&m, "d")), pty_writer.lock()) {
                             let _ = pw.write_all(&keys);
                             let _ = pw.flush();
+                            let color = guest_color(gid);
+                            // the guests' windows show the same badge; told at most twice a second per person
+                            if last_told.map(|(g, at)| g != gid || at.elapsed() > Duration::from_millis(500)).unwrap_or(true) {
+                                last_told = Some((gid, Instant::now()));
+                                let who = json!({"n": name, "c": color}).to_string();
+                                let _ = otx.send(json!({"t":"typing","d":seal(&key, Dir::Out, who.as_bytes())}));
+                            }
                             if let Ok(mut t) = shared.typing.lock() {
-                                *t = Some(crate::term::Typing { name, color: guest_color(gid), at: Instant::now() });
+                                *t = Some(crate::term::Typing { name, color, at: Instant::now() });
                             }
                         }
                     }
@@ -296,7 +304,7 @@ mod tests {
 
         // the guest: its own account, its own ticket, the real program
         let pass = sync_client::api::Api::new(&base, Some(guest_tok)).relay_pass().unwrap();
-        let mut guest = Command::new(&guest_exe).args(["--relay-join", &pass.addr, &share, "ann", &pass.ticket]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+        let mut guest = Command::new(&guest_exe).args(["--relay-join", &pass.addr, &share, "ann", &pass.ticket]).env("SSHTUP_TYPING_SECRET", "s3cret").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
         let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
         let (seen2, mut out) = (seen.clone(), guest.stdout.take().unwrap());
         std::thread::spawn(move || {
@@ -331,6 +339,9 @@ mod tests {
         wait_for("typed bytes at the host", || typed.lock().unwrap().ends_with(b"ls\n"));
         let badge = shared.typing.lock().unwrap().clone().expect("the host sees who typed");
         assert_eq!((badge.name.as_str(), badge.color), ("ann", guest_color(gid)));
+        // and the guest's own window is told, in the private sequence its app looks for
+        let told = crate::typing_osc::emit("s3cret", "ann", guest_color(gid));
+        wait_for("the guest window to be told who typed", || seen.lock().unwrap().windows(told.len()).any(|w| w == told.as_slice()));
         // taking it back stops the keys again
         link.set_guest_can_type(gid, false);
         std::thread::sleep(Duration::from_millis(300));
