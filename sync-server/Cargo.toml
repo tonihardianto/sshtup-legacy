@@ -27,7 +27,7 @@ getrandom = "0.2"
 
 [dev-dependencies]
 ureq = { version = "2", features = ["json"] }
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 
 [profile.dev.package.argon2]
 opt-level = 3
