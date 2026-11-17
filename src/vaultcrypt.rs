@@ -95,7 +95,7 @@ impl VaultKey {
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptError> {
         let nonce = random::<NONCE_LEN>()?;
         let mut out = self.header(&nonce);
-        let cipher = XChaCha20Poly1305::new(self.key.as_ref().into());
+        let cipher = XChaCha20Poly1305::new((&*self.key).into());
         let ct = cipher
             .encrypt(XNonce::from_slice(&nonce), Payload { msg: plaintext, aad: &out })
             .map_err(|_| CryptError::Internal)?;
@@ -121,7 +121,7 @@ pub fn decrypt(bytes: &[u8], password: &str) -> Result<(Zeroizing<Vec<u8>>, Vaul
     salt.copy_from_slice(&bytes[19..19 + SALT_LEN]);
     let nonce = &bytes[19 + SALT_LEN..HEADER_LEN];
     let key = derive(password, &salt, m_kib, t, p)?;
-    let cipher = XChaCha20Poly1305::new(key.as_ref().into());
+    let cipher = XChaCha20Poly1305::new((&*key).into());
     let pt = cipher
         .decrypt(XNonce::from_slice(nonce), Payload { msg: &bytes[HEADER_LEN..], aad: &bytes[..HEADER_LEN] })
         .map_err(|_| CryptError::WrongPassword)?;
