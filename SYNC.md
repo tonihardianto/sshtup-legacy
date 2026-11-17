@@ -76,6 +76,20 @@ It is safe to run while the server is serving and refuses to overwrite a file. T
 with `serve --db <copy>`. Back up the file off the machine; everything in it is encrypted or hashed, but it is
 the only copy of your team structure and the sealed keys.
 
+## Updating the server
+
+On the machine that runs the server, put [`deploy/update.sh`](deploy/update.sh) next to `sshtup_sync_server` and run it:
+
+```bash
+./update.sh            # the latest release
+./update.sh v0.2.0     # a specific one, which is also how you go back
+```
+
+It downloads the server tarball, checks it against the release's `SHA256SUMS.txt`, backs up the database, swaps the
+binary, restarts the systemd unit (`SERVICE`, default `sshtup-sync`) and waits to see that it stays up. If it does not,
+the old binary is put back. Nothing is changed before the checksum passes. `DIR`, `DB`, `BACKUPS` and `KEEP` can be set
+as environment variables; the header of the script lists them.
+
 ## Limits you should know about
 
 * **Metadata is visible** to whoever runs the server (see the table).
