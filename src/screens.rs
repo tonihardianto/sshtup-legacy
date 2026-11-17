@@ -553,8 +553,6 @@ impl App {
                 let entries = [
                     (Icon::FolderPlus, "New Group", HAct::NewGroup),
                     (Icon::Upload, "Import ~/.ssh/config", HAct::ImportConfig),
-                    (Icon::Terminal, "Local terminal", HAct::LocalTerminal),
-                    (Icon::Users, "Join shared session", HAct::JoinShared),
                 ];
                 for (icon, text, a) in entries {
                     if icon_text_button(ui, icon, text).clicked() {
@@ -563,6 +561,15 @@ impl App {
                     }
                 }
             });
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if icon_text_button(ui, crate::icons::Icon::Terminal, "Local terminal").clicked() {
+                acts.push(HAct::LocalTerminal);
+            }
+            if icon_text_button(ui, crate::icons::Icon::Users, "Join shared session").clicked() {
+                acts.push(HAct::JoinShared);
+            }
         });
         ui.add_space(8.0);
         self.join_window(ui.ctx());
