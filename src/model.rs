@@ -54,6 +54,9 @@ pub struct Host {
     pub color_scheme: Option<String>,
     pub font_size: Option<f32>,
     pub last_used: u64,
+    /// Shown in the Pinned section at the top of the Hosts screen.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl Host {

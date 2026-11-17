@@ -3,6 +3,7 @@ mod autocomplete;
 mod card;
 mod collab;
 mod collab_net;
+mod hostcard;
 mod icons;
 mod lock;
 mod model;
