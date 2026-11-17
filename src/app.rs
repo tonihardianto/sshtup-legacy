@@ -128,7 +128,6 @@ pub struct App {
     /// Set by Cmd/Ctrl+K: the Hosts search box takes the focus on the next frame.
     pub focus_search: bool,
     pub cur_group: Option<u64>,
-    pub host_filter: crate::screens::HostFilter,
     pub forwards_live: HashMap<u64, PtySession>,
     pub toast: Option<(String, Instant, Color32)>,
     pub tz: i64,
@@ -272,7 +271,6 @@ impl App {
             search: String::new(),
             cur_group: None,
             focus_search: false,
-            host_filter: Default::default(),
             forwards_live: HashMap::new(),
             toast: None,
             tz: local_tz_offset(),
