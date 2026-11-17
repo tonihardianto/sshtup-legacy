@@ -54,7 +54,7 @@ pub fn is_encrypted(bytes: &[u8]) -> bool {
 
 fn random<const N: usize>() -> Result<[u8; N], CryptError> {
     let mut b = [0u8; N];
-    getrandom::getrandom(&mut b).map_err(|_| CryptError::Internal)?;
+    getrandom::fill(&mut b).map_err(|_| CryptError::Internal)?;
     Ok(b)
 }
 

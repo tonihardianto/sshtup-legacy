@@ -74,7 +74,7 @@ pub enum Dir {
 
 pub fn new_key() -> [u8; KEY_LEN] {
     let mut k = [0u8; KEY_LEN];
-    getrandom::getrandom(&mut k).expect("system random");
+    getrandom::fill(&mut k).expect("system random");
     k
 }
 
@@ -94,7 +94,7 @@ fn aad(d: Dir) -> &'static [u8] {
 /// nonce(24) | ciphertext, as hex.
 pub fn seal(key: &[u8; KEY_LEN], dir: Dir, plain: &[u8]) -> String {
     let mut nonce = [0u8; 24];
-    getrandom::getrandom(&mut nonce).expect("system random");
+    getrandom::fill(&mut nonce).expect("system random");
     let ct = cipher(key).encrypt(XNonce::from_slice(&nonce), Payload { msg: plain, aad: aad(dir) }).expect("encrypt");
     hex(&[nonce.as_slice(), &ct].concat())
 }

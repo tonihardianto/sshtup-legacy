@@ -37,10 +37,10 @@ pub fn register(api: &Api, email: &str, password: &str, invite: &str) -> Result<
         return Err(SyncError::Rejected(format!("use at least {MIN_SYNC_PASSWORD} characters")));
     }
     let mut salt = [0u8; 16];
-    getrandom::getrandom(&mut salt).map_err(|_| bad("no randomness"))?;
+    getrandom::fill(&mut salt).map_err(|_| bad("no randomness"))?;
     let keys = derive_account(password, &salt).map_err(|_| bad("key derivation"))?;
     let mut sync_key = Zeroizing::new([0u8; 32]);
-    getrandom::getrandom(&mut *sync_key).map_err(|_| bad("no randomness"))?;
+    getrandom::fill(&mut *sync_key).map_err(|_| bad("no randomness"))?;
     let kp = new_keypair();
     let (recovery_text, recovery_key) = new_recovery_key();
     let req = RegisterReq {
@@ -77,7 +77,7 @@ fn new_password_material(password: &str, sync_key: &[u8; 32]) -> Result<(String,
         return Err(SyncError::Rejected(format!("use at least {MIN_SYNC_PASSWORD} characters")));
     }
     let mut salt = [0u8; 16];
-    getrandom::getrandom(&mut salt).map_err(|_| bad("no randomness"))?;
+    getrandom::fill(&mut salt).map_err(|_| bad("no randomness"))?;
     let keys = derive_account(password, &salt).map_err(|_| bad("key derivation"))?;
     Ok((b64().encode(salt), b64().encode(keys.auth), b64().encode(wrap_key(&keys.enc, "sync-key", sync_key))))
 }

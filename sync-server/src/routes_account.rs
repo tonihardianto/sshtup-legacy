@@ -40,7 +40,7 @@ fn server_secret(c: &rusqlite::Connection) -> Vec<u8> {
         return v;
     }
     let mut s = [0u8; 32];
-    getrandom::getrandom(&mut s).expect("system random");
+    getrandom::fill(&mut s).expect("system random");
     let _ = c.execute("INSERT OR IGNORE INTO meta(k,v) VALUES('salt_secret',?1)", [s.as_slice()]);
     s.to_vec()
 }

@@ -264,7 +264,7 @@ impl Vault {
     pub fn new_id(&mut self) -> u64 {
         loop {
             let mut b = [0u8; 8];
-            getrandom::getrandom(&mut b).expect("system random");
+            getrandom::fill(&mut b).expect("system random");
             let id = u64::from_le_bytes(b);
             if id != 0 && !self.id_in_use(id) {
                 return id;
