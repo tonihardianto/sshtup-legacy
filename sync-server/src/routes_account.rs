@@ -14,14 +14,14 @@ use sync_core::wire::{LoginReq, LoginResp, PasswordReq, RecoverFinishReq, Recove
 
 pub fn routes() -> Router<State> {
     Router::new()
-        .route("/v1/account/:email/salt", get(salt))
+        .route("/v1/account/{email}/salt", get(salt))
         .route("/v1/register", post(register))
         .route("/v1/login", post(login))
         .route("/v1/logout", post(logout))
         .route("/v1/devices", get(devices))
-        .route("/v1/devices/:id", axum::routing::delete(revoke))
+        .route("/v1/devices/{id}", axum::routing::delete(revoke))
         .route("/v1/account/password", post(change_password))
-        .route("/v1/recover/:email", get(recover_start))
+        .route("/v1/recover/{email}", get(recover_start))
         .route("/v1/recover", post(recover_finish))
         .layer(DefaultBodyLimit::max(64 * 1024))
 }
