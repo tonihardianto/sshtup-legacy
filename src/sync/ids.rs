@@ -14,7 +14,7 @@ pub fn migrate_ids(v: &mut Vault) -> usize {
     let mut taken: HashSet<u64> = HashSet::new();
     let mut fresh = || loop {
         let mut b = [0u8; 8];
-        getrandom::getrandom(&mut b).expect("system random");
+        getrandom::fill(&mut b).expect("system random");
         let id = u64::from_le_bytes(b);
         if id > 1_000_000 && taken.insert(id) {
             return id;

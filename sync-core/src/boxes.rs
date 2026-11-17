@@ -13,7 +13,7 @@ pub struct Keypair {
 
 pub fn new_keypair() -> Keypair {
     let mut s = Zeroizing::new([0u8; 32]);
-    getrandom::getrandom(&mut *s).expect("system random");
+    getrandom::fill(&mut *s).expect("system random");
     keypair_from_secret(&s)
 }
 
@@ -37,7 +37,7 @@ pub fn seal_to(public: &[u8; 32], msg: &[u8]) -> Vec<u8> {
     let shared = StaticSecret::from(*eph.secret).diffie_hellman(&PublicKey::from(*public));
     let key = derive(shared.as_bytes(), &eph.public, public);
     let mut nonce = [0u8; 24];
-    getrandom::getrandom(&mut nonce).expect("system random");
+    getrandom::fill(&mut nonce).expect("system random");
     let ct = XChaCha20Poly1305::new((&*key).into())
         .encrypt(XNonce::from_slice(&nonce), Payload { msg, aad: &eph.public })
         .expect("encrypt");

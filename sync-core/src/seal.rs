@@ -42,7 +42,7 @@ fn cipher(key: &[u8; 32]) -> XChaCha20Poly1305 {
 /// Blob layout: version(1) | nonce(24) | ciphertext+tag.
 pub fn seal_item(key: &[u8; 32], meta: &ItemMeta, plaintext: &[u8]) -> Vec<u8> {
     let mut nonce = [0u8; NONCE];
-    getrandom::getrandom(&mut nonce).expect("system random");
+    getrandom::fill(&mut nonce).expect("system random");
     let ct = cipher(key)
         .encrypt(XNonce::from_slice(&nonce), Payload { msg: plaintext, aad: &meta.aad() })
         .expect("encrypt");

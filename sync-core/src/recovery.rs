@@ -6,7 +6,7 @@ const ALPHA: base32::Alphabet = base32::Alphabet::Rfc4648 { padding: false };
 /// 32 random bytes plus a 2-byte checksum, as base32 in groups of 5 so a typo is caught.
 pub fn new_recovery_key() -> (String, Zeroizing<[u8; 32]>) {
     let mut key = Zeroizing::new([0u8; 32]);
-    getrandom::getrandom(&mut *key).expect("system random");
+    getrandom::fill(&mut *key).expect("system random");
     let mut raw = key.to_vec();
     raw.extend_from_slice(&Sha256::digest(&*key)[..2]);
     let text = base32::encode(ALPHA, &raw);

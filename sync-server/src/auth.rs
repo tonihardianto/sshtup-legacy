@@ -108,7 +108,7 @@ fn argon() -> Argon2<'static> {
 /// salt(16) | hash(32)
 pub fn hash_auth(auth_key: &[u8]) -> Vec<u8> {
     let mut salt = [0u8; 16];
-    getrandom::getrandom(&mut salt).expect("system random");
+    getrandom::fill(&mut salt).expect("system random");
     let mut out = [0u8; 32];
     argon().hash_password_into(auth_key, &salt, &mut out).expect("argon2");
     [salt.as_slice(), &out].concat()
@@ -127,7 +127,7 @@ pub fn verify_auth(auth_key: &[u8], stored: &[u8]) -> bool {
 
 pub fn new_token() -> String {
     let mut t = [0u8; 32];
-    getrandom::getrandom(&mut t).expect("system random");
+    getrandom::fill(&mut t).expect("system random");
     base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &t)
 }
 
