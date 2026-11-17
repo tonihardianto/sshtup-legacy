@@ -54,15 +54,6 @@ enum EdAct {
     GenKey,
 }
 
-/// Which hosts the Hosts screen lists.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-pub enum HostFilter {
-    #[default]
-    All,
-    Connected,
-    HasTags,
-}
-
 enum HAct {
     Sftp(u64),
     Pin(u64),
@@ -558,14 +549,15 @@ impl App {
                 ui.set_min_width(190.0);
                 ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
                 ui.spacing_mut().item_spacing.y = 2.0;
+                use crate::icons::Icon;
                 let entries = [
-                    ("New Group", HAct::NewGroup),
-                    ("Import ~/.ssh/config", HAct::ImportConfig),
-                    ("Local terminal", HAct::LocalTerminal),
-                    ("Join shared session", HAct::JoinShared),
+                    (Icon::FolderPlus, "New Group", HAct::NewGroup),
+                    (Icon::Upload, "Import ~/.ssh/config", HAct::ImportConfig),
+                    (Icon::Terminal, "Local terminal", HAct::LocalTerminal),
+                    (Icon::Users, "Join shared session", HAct::JoinShared),
                 ];
-                for (text, a) in entries {
-                    if ui.button(text).clicked() {
+                for (icon, text, a) in entries {
+                    if icon_text_button(ui, icon, text).clicked() {
                         acts.push(a);
                         ui.close();
                     }
@@ -598,14 +590,6 @@ impl App {
             });
             ui.add_space(6.0);
         }
-        ui.horizontal(|ui| {
-            for (f, text) in [(HostFilter::All, "All"), (HostFilter::Connected, "Connected"), (HostFilter::HasTags, "Has tags")] {
-                if ui.add(egui::Button::new(RichText::new(text).size(12.5)).selected(self.host_filter == f).corner_radius(14)).clicked() {
-                    self.host_filter = f;
-                }
-            }
-        });
-        ui.add_space(8.0);
 
         let looks_quick = !q.is_empty() && (q.contains('@') || q.starts_with("ssh "));
         if looks_quick {
@@ -618,12 +602,6 @@ impl App {
 
         let grid = self.vault.settings.grid_layout;
         let live_ids: std::collections::HashSet<u64> = self.tabs.iter().filter(|t| t.sess.is_alive()).filter_map(|t| t.sess.spec.host_id).collect();
-        let filter = self.host_filter;
-        let passes = |h: &Host| match filter {
-            HostFilter::All => true,
-            HostFilter::Connected => live_ids.contains(&h.id),
-            HostFilter::HasTags => !h.tags.is_empty(),
-        };
         let sort = |v: &mut Vec<Host>, by: &str| match by {
             "Name" => v.sort_by_key(|h| h.display_label().to_lowercase()),
             _ => v.sort_by_key(|h| std::cmp::Reverse(h.last_used)),
@@ -633,14 +611,13 @@ impl App {
             .vault
             .hosts
             .iter()
-            .filter(|h| passes(h))
-            .filter(|h| if q.is_empty() { h.group == self.cur_group && !h.pinned } else { h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q) || h.tags.iter().any(|t| t.to_lowercase().contains(&q)) })
+                        .filter(|h| if q.is_empty() { h.group == self.cur_group && !h.pinned } else { h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q) || h.tags.iter().any(|t| t.to_lowercase().contains(&q)) })
             .cloned()
             .collect();
         sort(&mut hosts, &self.vault.settings.sort_by);
-        let mut pinned: Vec<Host> = if q.is_empty() { self.vault.hosts.iter().filter(|h| h.pinned && passes(h)).cloned().collect() } else { vec![] };
+        let mut pinned: Vec<Host> = if q.is_empty() { self.vault.hosts.iter().filter(|h| h.pinned).cloned().collect() } else { vec![] };
         sort(&mut pinned, &self.vault.settings.sort_by);
-        let groups: Vec<Group> = if q.is_empty() && filter == HostFilter::All { self.vault.groups.iter().filter(|g| g.parent == self.cur_group).cloned().collect() } else { vec![] };
+        let groups: Vec<Group> = if q.is_empty() { self.vault.groups.iter().filter(|g| g.parent == self.cur_group).cloned().collect() } else { vec![] };
 
         if hosts.is_empty() && pinned.is_empty() && groups.is_empty() && !looks_quick {
             if self.vault.hosts.is_empty() && self.vault.groups.is_empty() {

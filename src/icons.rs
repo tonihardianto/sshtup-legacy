@@ -31,6 +31,7 @@ pub enum Icon {
     Power,
     Sliders,
     List,
+    FolderPlus,
 }
 
 impl Icon {

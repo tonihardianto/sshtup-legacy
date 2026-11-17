@@ -16,7 +16,7 @@ ICONS = [
     ("Group", "layout-grid"), ("User", "user"), ("Bell", "bell"), ("Close", "x"), ("Terminal", "terminal"),
     ("Search", "search"), ("ChevLeft", "chevron-left"), ("ChevRight", "chevron-right"), ("ChevDown", "chevron-down"),
     ("ChevUp", "chevron-up"), ("File", "file"), ("Users", "users"), ("Upload", "upload"), ("Copy", "copy"),
-    ("Stop", "square"), ("Power", "power"), ("Sliders", "settings-2"), ("List", "list"),
+    ("Stop", "square"), ("FolderPlus", "folder-plus"), ("Power", "power"), ("Sliders", "settings-2"), ("List", "list"),
 ]
 NS = "{http://www.w3.org/2000/svg}"
 
