@@ -3,7 +3,7 @@
 //! the terminal traffic is end-to-end encrypted, the server only passes it along.
 
 use crate::app::{App, Screen};
-use crate::collab_net::{start_host, HostLink, Status};
+use crate::collab_net::{guest_color, start_host, GuestInfo, HostLink, Status};
 use crate::model::*;
 use crate::screens::page_header;
 use crate::ui::*;
@@ -15,7 +15,6 @@ pub struct Share {
     pub tab_id: u64,
     /// Local-only code, used when no relay is set up.
     pub local_code: String,
-    pub can_type: bool,
     pub started: u64,
     pub link: Option<HostLink>,
 }
@@ -27,23 +26,49 @@ impl Share {
             None => self.local_code.clone(),
         }
     }
+    pub fn guests(&self) -> Vec<GuestInfo> {
+        self.link.as_ref().map(|l| l.state.lock().unwrap().guests.clone()).unwrap_or_default()
+    }
     /// What to show under the terminal's name, and whether it is good news.
     pub fn status_line(&self) -> (String, bool) {
-        let mode = if self.can_type { "guests can type" } else { "view only" };
         match &self.link {
-            None => (format!("Code {} · {} · local only, nobody can join", self.local_code, mode), false),
+            None => (format!("Code {} · local only, nobody can join", self.local_code), false),
             Some(l) => {
                 let s = l.state.lock().unwrap();
                 match s.status {
                     Status::Connecting => ("Connecting to the relay…".into(), true),
                     Status::Failed => (format!("Relay problem: {}", s.error), false),
                     Status::Live => {
-                        let who = if s.guests.is_empty() { "no guests yet".to_string() } else { format!("{} here: {}", s.guests.len(), s.guests.iter().map(|g| g.1.clone()).collect::<Vec<_>>().join(", ")) };
-                        (format!("Code {} · {} · {}", s.code, mode, who), true)
+                        let who = if s.guests.is_empty() {
+                            "no guests yet".to_string()
+                        } else {
+                            let typing = s.guests.iter().filter(|g| g.can_type).count();
+                            format!("{} here: {} · {} can type", s.guests.len(), s.guests.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", "), typing)
+                        };
+                        (format!("Code {} · {}", s.code, who), true)
                     }
                 }
             }
         }
+    }
+}
+
+impl CollabState {
+    /// The people in a shared terminal, for the avatars on its tab: the host first, then the guests.
+    pub fn people(&self, tab_id: u64) -> Vec<(String, egui::Color32)> {
+        let Some(s) = self.shares.iter().find(|s| s.tab_id == tab_id) else { return vec![] };
+        let Some(l) = &s.link else { return vec![] };
+        let st = l.state.lock().unwrap();
+        if st.status != Status::Live {
+            return vec![];
+        }
+        let me = std::env::var("USER").unwrap_or_else(|_| "you".into());
+        let mut v = vec![(me, BLUE)];
+        for g in st.guests.iter().take(3) {
+            let c = guest_color(g.gid);
+            v.push((g.name.clone(), egui::Color32::from_rgb(c[0], c[1], c[2])));
+        }
+        v
     }
 }
 
@@ -60,7 +85,8 @@ pub enum CollabAct {
     None,
     Start,
     Stop,
-    ToggleType,
+    /// Let this guest type (true) or make them view only (false).
+    GuestType(u64, bool),
     CopyCode,
     OpenScreen,
 }
@@ -82,9 +108,12 @@ pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>) -> CollabAct {
                 act = CollabAct::CopyCode;
                 ui.close();
             }
-            if ui.button(if s.can_type { "Make view only" } else { "Let guests type" }).clicked() {
-                act = CollabAct::ToggleType;
-                ui.close();
+            for g in s.guests() {
+                let label = format!("{} {}", if g.can_type { "✓" } else { "○" }, if g.can_type { format!("{} can type", g.name) } else { format!("{} · view only", g.name) });
+                if ui.button(label).clicked() {
+                    act = CollabAct::GuestType(g.gid, !g.can_type);
+                    ui.close();
+                }
             }
             if ui.button("Stop sharing").clicked() {
                 act = CollabAct::Stop;
@@ -138,12 +167,9 @@ impl App {
                 self.collab.shares.retain(|s| s.tab_id != tab_id);
                 self.notify("Stopped sharing this terminal".into(), AMBER);
             }
-            CollabAct::ToggleType => {
-                if let Some(s) = self.collab.shares.iter_mut().find(|s| s.tab_id == tab_id) {
-                    s.can_type = !s.can_type;
-                    if let Some(l) = &s.link {
-                        l.set_can_type(s.can_type);
-                    }
+            CollabAct::GuestType(gid, on) => {
+                if let Some(l) = self.collab.shares.iter().find(|s| s.tab_id == tab_id).and_then(|s| s.link.as_ref()) {
+                    l.set_guest_can_type(gid, on);
                 }
             }
             CollabAct::CopyCode => {
@@ -169,7 +195,7 @@ impl App {
         };
         let link = self.tabs.iter().find(|t| t.id == tab_id).map(|t| start_host(cfg.server, cfg.token, t.sess.parser.clone(), t.sess.writer_handle(), t.sess.shared.clone(), self.ctx.clone()));
         let msg = if link.is_some() { "Sharing started. Guests join with the session code" } else { "That terminal is gone" };
-        self.collab.shares.push(Share { tab_id, local_code: make_code(tab_id), can_type: false, started: now_secs(), link });
+        self.collab.shares.push(Share { tab_id, local_code: make_code(tab_id), started: now_secs(), link });
         self.notify(msg.into(), if self.collab.shares.last().map(|s| s.link.is_some()).unwrap_or(false) { GREEN } else { AMBER });
     }
 
@@ -213,7 +239,7 @@ impl App {
         let mut start: Option<u64> = None;
         let mut stop: Option<u64> = None;
         let mut copy: Option<String> = None;
-        let mut type_toggle: Option<u64> = None;
+        let mut guest_toggle: Option<(u64, u64, bool)> = None;
 
         page_header(ui, "Collaboration", |_| {});
 
@@ -319,14 +345,28 @@ impl App {
                                 if flat_button(ui, "Copy code").clicked() {
                                     copy = Some(s.code());
                                 }
-                                let mut can = s.can_type;
-                                ui.label(RichText::new("Guests can type").size(12.0).color(MUTED));
-                                if toggle(ui, &mut can).changed() {
-                                    type_toggle = Some(*id);
-                                }
                             }
                         });
                     });
+                    // who is here: one row per guest, with its own switch
+                    if let Some(s) = &share {
+                        for g in s.guests() {
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
+                                let c = guest_color(g.gid);
+                                avatar(ui.painter(), r.center(), 10.0, &g.name, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                                ui.label(RichText::new(&g.name).size(13.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let mut can = g.can_type;
+                                    ui.label(RichText::new("Can type").size(12.0).color(MUTED));
+                                    if toggle(ui, &mut can).changed() {
+                                        guest_toggle = Some((*id, g.gid, can));
+                                    }
+                                });
+                            });
+                        }
+                    }
                 });
             }
         });
@@ -343,12 +383,9 @@ impl App {
         if let Some(id) = stop {
             self.collab.shares.retain(|s| s.tab_id != id);
         }
-        if let Some(id) = type_toggle {
-            if let Some(s) = self.collab.shares.iter_mut().find(|s| s.tab_id == id) {
-                s.can_type = !s.can_type;
-                if let Some(l) = &s.link {
-                    l.set_can_type(s.can_type);
-                }
+        if let Some((id, gid, on)) = guest_toggle {
+            if let Some(l) = self.collab.shares.iter().find(|s| s.tab_id == id).and_then(|s| s.link.as_ref()) {
+                l.set_guest_can_type(gid, on);
             }
         }
         if let Some(c) = copy {

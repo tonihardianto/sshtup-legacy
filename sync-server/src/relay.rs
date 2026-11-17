@@ -61,6 +61,8 @@ struct Guest {
     name: String,
     tx: SyncSender<Value>,
     active: bool,
+    /// Whether this guest's keystrokes are passed on. New guests start view only.
+    can_type: bool,
 }
 
 struct Session {
@@ -262,10 +264,24 @@ fn host(reader: &mut BufReader<TcpStream>, tx: SyncSender<Value>, sessions: &Ses
                 }
             }
             "perm" => {
-                s.can_type = m.get("can_type").and_then(|x| x.as_bool()).unwrap_or(false);
-                let msg = json!({"t":"perm","can_type":s.can_type});
-                for g in &s.guests {
-                    let _ = g.tx.try_send(msg.clone());
+                let on = m.get("can_type").and_then(|x| x.as_bool()).unwrap_or(false);
+                let msg = json!({"t":"perm","can_type":on});
+                match m.get("gid").and_then(|x| x.as_u64()) {
+                    // one guest
+                    Some(gid) => {
+                        if let Some(g) = s.guests.iter_mut().find(|g| g.id == gid) {
+                            g.can_type = on;
+                            let _ = g.tx.try_send(msg);
+                        }
+                    }
+                    // everyone, and whoever joins next
+                    None => {
+                        s.can_type = on;
+                        for g in s.guests.iter_mut() {
+                            g.can_type = on;
+                            let _ = g.tx.try_send(msg.clone());
+                        }
+                    }
                 }
             }
             "end" => break,
@@ -297,8 +313,8 @@ fn guest(reader: &mut BufReader<TcpStream>, tx: SyncSender<Value>, first: &Value
         }
         let id = s.next;
         s.next += 1;
-        s.guests.push(Guest { id, name: name.clone(), tx: tx.clone(), active: false });
-        let _ = tx.send(json!({"t":"joined","can_type":s.can_type}));
+        s.guests.push(Guest { id, name: name.clone(), tx: tx.clone(), active: false, can_type: s.can_type });
+        let _ = tx.send(json!({"t":"joined","can_type":s.can_type,"gid":id}));
         let _ = s.host.try_send(json!({"t":"guest","gid":id,"name":name,"count":s.guests.len()}));
         id
     };
@@ -307,8 +323,9 @@ fn guest(reader: &mut BufReader<TcpStream>, tx: SyncSender<Value>, first: &Value
         if text(&m, "t") == "in" {
             let map = sessions.lock().unwrap();
             if let Some(s) = map.get(&code) {
-                if s.can_type {
-                    let _ = s.host.try_send(json!({"t":"in","d":text(&m,"d")}));
+                // the sender's id rides along so the host can tell who is typing
+                if s.guests.iter().find(|g| g.id == gid).map(|g| g.can_type).unwrap_or(false) {
+                    let _ = s.host.try_send(json!({"t":"in","gid":gid,"d":text(&m,"d")}));
                 } else {
                     let _ = tx.try_send(json!({"t":"denied"}));
                 }
@@ -393,16 +410,53 @@ mod tests {
         // typing is refused until the host allows it
         send(&mut gw, &json!({"t":"in","d":hex(b"x")})).unwrap();
         assert_eq!(text(&read_msg(&mut gr).unwrap(), "t"), "denied");
-        send(&mut hw, &json!({"t":"perm","can_type":true})).unwrap();
+        send(&mut hw, &json!({"t":"perm","gid":gid,"can_type":true})).unwrap();
         assert_eq!(text(&read_msg(&mut gr).unwrap(), "t"), "perm");
         send(&mut gw, &json!({"t":"in","d":hex(b"y")})).unwrap();
         let m = read_msg(&mut hr).unwrap();
         assert_eq!(text(&m, "t"), "in");
+        assert_eq!(m["gid"].as_u64(), Some(gid), "the host is told who typed");
         assert_eq!(unhex(text(&m, "d")), b"y");
 
         // ending the session tells the guest
         send(&mut hw, &json!({"t":"end"})).unwrap();
         assert_eq!(text(&read_msg(&mut gr).unwrap(), "t"), "ended");
+    }
+
+    #[test]
+    fn permission_is_per_guest() {
+        let (addr, tk) = start();
+        let (mut hr, mut hw) = connect(&addr);
+        send(&mut hw, &json!({"t":"host","ticket":tk.issue()})).unwrap();
+        let code = text(&read_msg(&mut hr).unwrap(), "code").to_string();
+        let join = |name: &str| {
+            let (mut r, mut w) = connect(&addr);
+            send(&mut w, &json!({"t":"join","ticket":tk.issue(),"code":code,"name":name})).unwrap();
+            assert_eq!(text(&read_msg(&mut r).unwrap(), "t"), "joined");
+            (r, w)
+        };
+        let (mut ar, mut aw) = join("ann");
+        let ga = read_msg(&mut hr).unwrap()["gid"].as_u64().unwrap();
+        let (mut br, mut bw) = join("bob");
+        let gb = read_msg(&mut hr).unwrap()["gid"].as_u64().unwrap();
+        assert_ne!(ga, gb);
+
+        // only ann may type
+        send(&mut hw, &json!({"t":"perm","gid":ga,"can_type":true})).unwrap();
+        assert_eq!(text(&read_msg(&mut ar).unwrap(), "t"), "perm");
+        send(&mut bw, &json!({"t":"in","d":hex(b"b")})).unwrap();
+        assert_eq!(text(&read_msg(&mut br).unwrap(), "t"), "denied", "bob is still view only");
+        send(&mut aw, &json!({"t":"in","d":hex(b"a")})).unwrap();
+        let m = read_msg(&mut hr).unwrap();
+        assert_eq!(m["gid"].as_u64(), Some(ga));
+        assert_eq!(unhex(text(&m, "d")), b"a");
+
+        // taking it back stops ann at once
+        send(&mut hw, &json!({"t":"perm","gid":ga,"can_type":false})).unwrap();
+        let m = read_msg(&mut ar).unwrap();
+        assert_eq!((text(&m, "t"), m["can_type"].as_bool()), ("perm", Some(false)));
+        send(&mut aw, &json!({"t":"in","d":hex(b"a")})).unwrap();
+        assert_eq!(text(&read_msg(&mut ar).unwrap(), "t"), "denied");
     }
 
     #[test]

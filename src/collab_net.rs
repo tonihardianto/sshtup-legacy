@@ -11,7 +11,7 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -20,11 +20,25 @@ pub enum Status {
     Failed,
 }
 
+/// One guest as the host sees them.
+#[derive(Clone, Debug)]
+pub struct GuestInfo {
+    pub gid: u64,
+    pub name: String,
+    /// New guests start view only; the host turns typing on for each one.
+    pub can_type: bool,
+}
+
+/// A colour per guest, stable for the whole session (the host's own avatar is blue).
+pub fn guest_color(gid: u64) -> [u8; 3] {
+    const PALETTE: [[u8; 3]; 8] = [[255, 196, 61], [240, 98, 146], [77, 208, 140], [186, 140, 255], [255, 138, 76], [64, 210, 220], [180, 220, 70], [255, 120, 120]];
+    PALETTE[(gid as usize) % PALETTE.len()]
+}
+
 pub struct LinkState {
     pub status: Status,
     pub code: String,
-    pub guests: Vec<(u64, String)>,
-    pub can_type: bool,
+    pub guests: Vec<GuestInfo>,
     pub error: String,
 }
 
@@ -59,10 +73,13 @@ pub struct HostLink {
 }
 
 impl HostLink {
-    pub fn set_can_type(&self, on: bool) {
-        self.state.lock().unwrap().can_type = on;
+    /// Let one guest type, or take it back. Takes effect on the host's side at once.
+    pub fn set_guest_can_type(&self, gid: u64, on: bool) {
+        if let Some(g) = self.state.lock().unwrap().guests.iter_mut().find(|g| g.gid == gid) {
+            g.can_type = on;
+        }
         if let Some(c) = self.guard.inner.ctl.lock().unwrap().as_ref() {
-            let _ = c.send(json!({"t":"perm","can_type":on}));
+            let _ = c.send(json!({"t":"perm","gid":gid,"can_type":on}));
         }
     }
 }
@@ -82,7 +99,7 @@ pub fn start_host(
     shared: Arc<Shared>,
     ctx: egui::Context,
 ) -> HostLink {
-    let state = Arc::new(Mutex::new(LinkState { status: Status::Connecting, code: String::new(), guests: vec![], can_type: false, error: String::new() }));
+    let state = Arc::new(Mutex::new(LinkState { status: Status::Connecting, code: String::new(), guests: vec![], error: String::new() }));
     let inner = Arc::new(Inner { ctl: Mutex::new(None), stopped: AtomicBool::new(false) });
     let guard = Arc::new(Guard { inner: inner.clone(), shared: shared.clone() });
     let link = HostLink { state: state.clone(), guard };
@@ -153,18 +170,25 @@ pub fn start_host(
                     let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
                     let snap = parser.lock().map(|p| p.screen().contents_formatted()).unwrap_or_default();
                     let _ = otx.send(json!({"t":"snap","gid":gid,"d":seal(&key, Dir::Out, snap.as_bytes())}));
-                    state.lock().unwrap().guests.push((gid, text(&m, "name").to_string()));
+                    state.lock().unwrap().guests.push(GuestInfo { gid, name: text(&m, "name").to_string(), can_type: false });
                 }
                 "left" => {
                     let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
-                    state.lock().unwrap().guests.retain(|g| g.0 != gid);
+                    state.lock().unwrap().guests.retain(|g| g.gid != gid);
                 }
                 "in" => {
-                    if state.lock().unwrap().can_type {
+                    // checked here as well as at the relay: a guest without permission is dropped,
+                    // whatever the relay passed on
+                    let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
+                    let who = state.lock().unwrap().guests.iter().find(|g| g.gid == gid && g.can_type).map(|g| g.name.clone());
+                    if let Some(name) = who {
                         // a chunk that does not open with the session key is not from a guest who has it
                         if let (Some(keys), Ok(mut pw)) = (open(&key, Dir::In, text(&m, "d")), pty_writer.lock()) {
                             let _ = pw.write_all(&keys);
                             let _ = pw.flush();
+                            if let Ok(mut t) = shared.typing.lock() {
+                                *t = Some(crate::term::Typing { name, color: guest_color(gid), at: Instant::now() });
+                            }
                         }
                     }
                 }
@@ -260,6 +284,7 @@ mod tests {
             last_output: Mutex::new(Instant::now()),
             exit_code: Mutex::new(None),
             tap: Mutex::new(None),
+            typing: Mutex::new(None),
         });
         let link = start_host(base.clone(), host_tok, parser, writer, shared.clone(), egui::Context::default());
         wait_for("the host to go live", || link.state.lock().unwrap().status != Status::Connecting);
@@ -286,7 +311,7 @@ mod tests {
         let shows = |s: &str| String::from_utf8_lossy(&seen.lock().unwrap()).contains(s);
 
         wait_for("the guest to see the screen that was already there", || shows("already on screen"));
-        wait_for("the host to list the guest", || link.state.lock().unwrap().guests.iter().any(|g| g.1 == "ann"));
+        wait_for("the host to list the guest", || link.state.lock().unwrap().guests.iter().any(|g| g.name == "ann"));
         shared.tap.lock().unwrap().as_ref().unwrap().send(b"LIVE-OUTPUT".to_vec()).unwrap();
         wait_for("live output on the guest", || shows("LIVE-OUTPUT"));
 
@@ -296,12 +321,24 @@ mod tests {
         keys.flush().unwrap();
         std::thread::sleep(Duration::from_millis(600));
         assert!(typed.lock().unwrap().is_empty(), "a guest cannot type until the host allows it");
-        // allowed: they arrive
-        link.set_can_type(true);
+        assert!(shared.typing.lock().unwrap().is_none(), "no badge for keys that went nowhere");
+        // allowed (for that guest only): they arrive, and the host sees who typed
+        let gid = link.state.lock().unwrap().guests.iter().find(|g| g.name == "ann").unwrap().gid;
+        link.set_guest_can_type(gid, true);
         std::thread::sleep(Duration::from_millis(300));
         keys.write_all(b"ls\n").unwrap();
         keys.flush().unwrap();
         wait_for("typed bytes at the host", || typed.lock().unwrap().ends_with(b"ls\n"));
+        let badge = shared.typing.lock().unwrap().clone().expect("the host sees who typed");
+        assert_eq!((badge.name.as_str(), badge.color), ("ann", guest_color(gid)));
+        // taking it back stops the keys again
+        link.set_guest_can_type(gid, false);
+        std::thread::sleep(Duration::from_millis(300));
+        let before = typed.lock().unwrap().len();
+        keys.write_all(b"rm\n").unwrap();
+        keys.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(600));
+        assert_eq!(typed.lock().unwrap().len(), before, "a guest whose permission was taken back is dropped");
 
         // the host stops sharing: the guest is told and leaves
         drop(link);
