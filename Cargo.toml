@@ -21,7 +21,7 @@ vt100 = "0.18.1"
 winit = "0.30.13"
 zeroize = "1"
 sha2 = "0.11"
-base64 = "0.22"
+base64 = "0.23"
 sync-core = { path = "sync-core" }
 sync-client = { path = "sync-client" }
 
