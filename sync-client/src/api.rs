@@ -27,100 +27,137 @@ pub struct Api {
     agent: ureq::Agent,
 }
 
-fn map_err(e: ureq::Error) -> SyncError {
-    match e {
-        ureq::Error::Status(401, _) => SyncError::Unauthorized,
-        ureq::Error::Status(c, r) => SyncError::Rejected(format!("{c} {}", r.into_string().unwrap_or_default().chars().take(120).collect::<String>())),
-        ureq::Error::Transport(t) => SyncError::Network(t.to_string()),
+/// What came back: the status code and the body (read in full, whatever the status).
+struct Reply {
+    status: u16,
+    body: Vec<u8>,
+}
+
+/// An agent that hands back 4xx/5xx answers as ordinary replies, so their bodies can be read.
+fn agent(timeout: std::time::Duration) -> ureq::Agent {
+    ureq::Agent::new_with_config(ureq::Agent::config_builder().timeout_global(Some(timeout)).http_status_as_error(false).build())
+}
+
+fn network(e: ureq::Error) -> SyncError {
+    SyncError::Network(e.to_string())
+}
+
+impl Reply {
+    /// The body of a successful reply; a refusal becomes the matching error.
+    fn ok(self) -> Result<Vec<u8>, SyncError> {
+        match self.status {
+            200..=299 => Ok(self.body),
+            401 => Err(SyncError::Unauthorized),
+            c => Err(SyncError::Rejected(format!("{c} {}", String::from_utf8_lossy(&self.body).chars().take(120).collect::<String>()))),
+        }
     }
+}
+
+fn parse<T: serde::de::DeserializeOwned>(body: Vec<u8>) -> Result<T, SyncError> {
+    serde_json::from_slice(&body).map_err(|e| SyncError::Bad(e.to_string()))
 }
 
 impl Api {
     pub fn new(base: &str, token: Option<String>) -> Api {
-        let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(20)).build();
-        Api { base: base.trim_end_matches('/').to_string(), token, agent }
+        Api { base: base.trim_end_matches('/').to_string(), token, agent: agent(std::time::Duration::from_secs(20)) }
     }
-    fn req(&self, method: &str, path: &str) -> ureq::Request {
-        let r = self.agent.request(method, &format!("{}{}", self.base, path));
-        match &self.token {
-            Some(t) => r.set("Authorization", &format!("Bearer {t}")),
-            None => r,
+    fn send(&self, agent: &ureq::Agent, method: &str, path: &str, body: Option<Vec<u8>>) -> Result<Reply, SyncError> {
+        let mut b = ureq::http::Request::builder().method(method).uri(format!("{}{}", self.base, path));
+        if let Some(t) = &self.token {
+            b = b.header("Authorization", format!("Bearer {t}"));
         }
+        let res = match body {
+            Some(bytes) => agent.run(b.header("Content-Type", "application/json").body(bytes).map_err(|e| SyncError::Bad(e.to_string()))?),
+            None => agent.run(b.body(()).map_err(|e| SyncError::Bad(e.to_string()))?),
+        };
+        let resp = res.map_err(network)?;
+        let status = resp.status().as_u16();
+        let body = resp.into_body().with_config().limit(64 * 1024 * 1024).read_to_vec().map_err(network)?;
+        Ok(Reply { status, body })
     }
-    fn json<T: serde::de::DeserializeOwned>(r: Result<ureq::Response, ureq::Error>) -> Result<T, SyncError> {
-        r.map_err(map_err)?.into_json::<T>().map_err(|e| SyncError::Bad(e.to_string()))
+    fn get(&self, path: &str) -> Result<Vec<u8>, SyncError> {
+        self.send(&self.agent, "GET", path, None)?.ok()
+    }
+    fn delete(&self, path: &str) -> Result<Vec<u8>, SyncError> {
+        self.send(&self.agent, "DELETE", path, None)?.ok()
+    }
+    fn post<B: serde::Serialize>(&self, path: &str, body: &B) -> Result<Vec<u8>, SyncError> {
+        let bytes = serde_json::to_vec(body).map_err(|e| SyncError::Bad(e.to_string()))?;
+        self.send(&self.agent, "POST", path, Some(bytes))?.ok()
     }
     pub fn salt(&self, email: &str) -> Result<SaltResp, SyncError> {
-        Self::json(self.req("GET", &format!("/v1/account/{email}/salt")).call())
+        parse(self.get(&format!("/v1/account/{email}/salt"))?)
     }
     pub fn register(&self, r: &RegisterReq) -> Result<(), SyncError> {
-        self.req("POST", "/v1/register").send_json(r).map(|_| ()).map_err(map_err)
+        self.post("/v1/register", r).map(|_| ())
     }
     pub fn login(&self, r: &LoginReq) -> Result<LoginResp, SyncError> {
-        Self::json(self.req("POST", "/v1/login").send_json(r))
+        parse(self.post("/v1/login", r)?)
     }
     pub fn logout(&self) -> Result<(), SyncError> {
-        self.req("POST", "/v1/logout").send_json(serde_json::json!({})).map(|_| ()).map_err(map_err)
+        self.post("/v1/logout", &serde_json::json!({})).map(|_| ())
     }
     pub fn recover_start(&self, email: &str) -> Result<RecoverStartResp, SyncError> {
-        Self::json(self.req("GET", &format!("/v1/recover/{email}")).call())
+        parse(self.get(&format!("/v1/recover/{email}"))?)
     }
     pub fn recover_finish(&self, r: &RecoverFinishReq) -> Result<(), SyncError> {
-        self.req("POST", "/v1/recover").send_json(r).map(|_| ()).map_err(map_err)
+        self.post("/v1/recover", r).map(|_| ())
     }
     pub fn change_password(&self, r: &PasswordReq) -> Result<(), SyncError> {
-        self.req("POST", "/v1/account/password").send_json(r).map(|_| ()).map_err(map_err)
+        self.post("/v1/account/password", r).map(|_| ())
     }
     pub fn devices(&self) -> Result<Vec<serde_json::Value>, SyncError> {
-        Self::json(self.req("GET", "/v1/devices").call())
+        parse(self.get("/v1/devices")?)
     }
     pub fn create_team(&self, r: &TeamCreateReq) -> Result<i64, SyncError> {
-        let v: serde_json::Value = Self::json(self.req("POST", "/v1/teams").send_json(r))?;
+        let v: serde_json::Value = parse(self.post("/v1/teams", r)?)?;
         v["id"].as_i64().ok_or_else(|| SyncError::Bad("team id".into()))
     }
     pub fn team_lookup(&self, team: i64, email: &str) -> Result<TeamLookupResp, SyncError> {
-        Self::json(self.req("POST", &format!("/v1/teams/{team}/lookup")).send_json(TeamLookupReq { email: email.to_string() }))
+        parse(self.post(&format!("/v1/teams/{team}/lookup"), &TeamLookupReq { email: email.to_string() })?)
     }
     pub fn team_add_member(&self, team: i64, r: &TeamAddMemberReq) -> Result<(), SyncError> {
-        self.req("POST", &format!("/v1/teams/{team}/members")).send_json(r).map(|_| ()).map_err(map_err)
+        self.post(&format!("/v1/teams/{team}/members"), r).map(|_| ())
     }
     pub fn teams(&self) -> Result<TeamsResp, SyncError> {
-        Self::json(self.req("GET", "/v1/teams").call())
+        parse(self.get("/v1/teams")?)
     }
     pub fn remove_member(&self, team: i64, user: i64) -> Result<(), SyncError> {
-        self.req("DELETE", &format!("/v1/teams/{team}/members/{user}")).call().map(|_| ()).map_err(map_err)
+        self.delete(&format!("/v1/teams/{team}/members/{user}")).map(|_| ())
     }
     pub fn rotate(&self, team: i64, r: &RotateReq) -> Result<(), SyncError> {
-        self.req("POST", &format!("/v1/teams/{team}/rotate")).send_json(r).map(|_| ()).map_err(map_err)
+        self.post(&format!("/v1/teams/{team}/rotate"), r).map(|_| ())
     }
     pub fn rotate_items(&self, team: i64, r: &RotateItemsReq) -> Result<RotateItemsResp, SyncError> {
-        Self::json(self.req("POST", &format!("/v1/teams/{team}/rotate/items")).send_json(r))
+        parse(self.post(&format!("/v1/teams/{team}/rotate/items"), r)?)
     }
     /// A one-time ticket for the shared-terminal relay and the `host:port` to connect to.
     /// The relay runs on its own port of the same machine as the sync server.
     pub fn relay_pass(&self) -> Result<RelayPass, SyncError> {
-        let r = self.req("POST", "/v1/relay/ticket").timeout(std::time::Duration::from_secs(6)).send_json(serde_json::json!({}));
-        let v: serde_json::Value = match r {
-            Err(ureq::Error::Status(404, _)) => return Err(SyncError::Rejected("this server has no shared-terminal relay switched on (start it with --relay-listen)".into())),
-            other => Self::json(other)?,
-        };
+        let quick = agent(std::time::Duration::from_secs(6));
+        let bytes = serde_json::to_vec(&serde_json::json!({})).map_err(|e| SyncError::Bad(e.to_string()))?;
+        let reply = self.send(&quick, "POST", "/v1/relay/ticket", Some(bytes))?;
+        if reply.status == 404 {
+            return Err(SyncError::Rejected("this server has no shared-terminal relay switched on (start it with --relay-listen)".into()));
+        }
+        let v: serde_json::Value = parse(reply.ok()?)?;
         let ticket = v["ticket"].as_str().ok_or_else(|| SyncError::Bad("ticket".into()))?.to_string();
         let port = v["port"].as_u64().filter(|p| *p > 0 && *p < 65536).ok_or_else(|| SyncError::Bad("port".into()))?;
         let host = host_of(&self.base).ok_or_else(|| SyncError::Bad("server address".into()))?;
         Ok(RelayPass { ticket, addr: format!("{host}:{port}") })
     }
     pub fn revoke_device(&self, id: i64) -> Result<(), SyncError> {
-        self.req("DELETE", &format!("/v1/devices/{id}")).call().map(|_| ()).map_err(map_err)
+        self.delete(&format!("/v1/devices/{id}")).map(|_| ())
     }
 }
 
 impl Remote for Api {
     fn push(&mut self, scope: &str, items: Vec<WireItem>) -> Result<PushResp, SyncError> {
-        Self::json(self.req("POST", "/v1/push").send_json(PushReq { scope: scope.to_string(), items }))
+        parse(self.post("/v1/push", &PushReq { scope: scope.to_string(), items })?)
     }
     fn pull(&mut self, scope: &str, since: u64, limit: u32) -> Result<PullResp, SyncError> {
         let q = format!("/v1/pull?scope={}&since={since}&limit={limit}", scope.replace(':', "%3A"));
-        Self::json(self.req("GET", &q).call())
+        parse(self.get(&q)?)
     }
 }
 
