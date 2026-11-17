@@ -58,6 +58,8 @@ pub struct CardIn<'a> {
     pub share: Option<&'a Share>,
     /// The people in a shared terminal (the host first), for the avatar stack.
     pub people: &'a [(String, Color32)],
+    /// False on a guest's tab: someone else's session is not ours to share.
+    pub can_share: bool,
 }
 
 const ROW_H: f32 = 34.0;
@@ -181,6 +183,7 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                                 }
                             });
                             match c.share {
+                                None if !c.can_share => {}
                                 None => {
                                     if row(ui, Icon::Users, "Share this terminal", TEXT).clicked() {
                                         act.collab = Some(CollabAct::Start);

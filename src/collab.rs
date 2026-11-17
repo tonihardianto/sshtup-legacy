@@ -92,10 +92,11 @@ pub enum CollabAct {
 }
 
 /// The entries of a terminal's Collaboration menu (the card on the terminal or right-click on its tab).
-pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>) -> CollabAct {
+pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>, can_share: bool) -> CollabAct {
     let mut act = CollabAct::None;
     ui.set_min_width(200.0);
     match shared {
+        None if !can_share => label_muted(ui, "Shared with you; it cannot be shared again"),
         None => {
             if ui.button("Share this terminal").clicked() {
                 act = CollabAct::Start;
@@ -176,6 +177,11 @@ impl App {
 
     fn collab_start(&mut self, tab_id: u64) {
         if self.collab.shares.iter().any(|s| s.tab_id == tab_id) {
+            return;
+        }
+        // a guest cannot hand the host's terminal on: the host never agreed to that person
+        if self.tabs.iter().any(|t| t.id == tab_id && t.sess.spec.is_guest()) {
+            self.notify("This terminal belongs to someone else's session, so it cannot be shared again.".into(), AMBER);
             return;
         }
         let Some(cfg) = self.vault.sync.clone() else {
