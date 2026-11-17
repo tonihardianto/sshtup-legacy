@@ -83,9 +83,21 @@ fn code_row(ui: &mut egui::Ui, code: &str) -> egui::Response {
     }
     let y = rect.center().y;
     ui.painter().text(Pos2::new(rect.left() + 12.0, y), Align2::LEFT_CENTER, "Code", egui::FontId::proportional(14.0), MUTED);
-    ui.painter().text(Pos2::new(rect.left() + 58.0, y), Align2::LEFT_CENTER, code, egui::FontId::monospace(14.0), TEXT);
+    // the real code is long: keep both ends and drop the middle so it fits between the label and the copy icon
+    let font = egui::FontId::monospace(14.0);
+    let char_w = ui.painter().layout_no_wrap("0".into(), font.clone(), TEXT).size().x.max(1.0);
+    let room = ((rect.right() - 38.0 - (rect.left() + 58.0)) / char_w).floor() as usize;
+    let chars: Vec<char> = code.chars().collect();
+    let shown = if chars.len() <= room || room < 8 {
+        code.to_string()
+    } else {
+        let tail = (room - 1) / 3;
+        let head = room - 1 - tail;
+        format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>())
+    };
+    ui.painter().text(Pos2::new(rect.left() + 58.0, y), Align2::LEFT_CENTER, shown, font, TEXT);
     crate::icons::paint(ui.painter(), Pos2::new(rect.right() - 16.0, y), 15.0, Icon::Copy, MUTED);
-    resp.on_hover_text("Copy the session code").on_hover_cursor(egui::CursorIcon::PointingHand)
+    resp.on_hover_text(format!("Copy the session code\n{code}")).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A guest: avatar, name and a switch for whether they may type. True when the switch was moved.
@@ -127,21 +139,24 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
             Corner::BottomLeft => Pos2::new(area.left() + 14.0, area.bottom() - 12.0),
         })
         .show(ctx, |ui| {
+            let round = !(open || c.bell || !c.people.is_empty());
             Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(0x1D, 0x20, 0x33, 238))
                 .stroke(Stroke::new(1.0, BORDER))
-                .corner_radius(12)
+                .corner_radius(if round { 16 } else { 12 })
                 .shadow(egui::Shadow { offset: [0, 6], blur: 20, spread: 0, color: Color32::from_black_alpha(90) })
-                .inner_margin(Margin::symmetric(11, 6))
+                .inner_margin(if round { Margin::same(7) } else { Margin::symmetric(11, 6) })
                 .show(ui, |ui| {
                     if open {
                         ui.set_min_width(230.0);
                     }
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.spacing_mut().interact_size.y = 18.0;
                     let head = ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.spacing_mut().item_spacing.x = if round { 0.0 } else { 6.0 };
                         ui.spacing_mut().interact_size.y = 18.0;
-                        let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
-                        status_dot(ui.painter(), r.center(), if c.alive { GREEN } else { RED });
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+                        crate::icons::paint(ui.painter(), r.center(), 16.0, Icon::Sliders, if c.alive { GREEN } else { RED });
                         if c.bell {
                             let (br, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
                             crate::icons::paint(ui.painter(), br.center(), 13.0, crate::icons::Icon::Bell, AMBER);
@@ -153,15 +168,19 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                                 avatar(ui.painter(), Pos2::new(r.left() + 9.0 + 14.0 * i as f32, r.center().y), 9.0, name, *col);
                             }
                         }
-                        if open && c.share.is_some() {
-                            ui.label(RichText::new("Sharing").size(13.0).color(GREEN));
+                        if open {
+                            let (text, col) = match (c.alive, c.share.is_some()) {
+                                (false, _) => ("Disconnected", RED),
+                                (true, true) => ("Sharing", GREEN),
+                                (true, false) => ("Connected", GREEN),
+                            };
+                            ui.label(RichText::new(text).size(13.0).color(col));
                         }
                     });
                     if ui.interact(head.response.rect, id.with("head"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         *pinned = !*pinned;
                     }
                     if open {
-                        ui.add_space(4.0);
                         ui.separator();
                         if !c.alive {
                             if ui.add_sized([ui.available_width(), 30.0], egui::Button::new(RichText::new("Reconnect").color(Color32::WHITE)).fill(BLUE)).clicked() {

@@ -30,6 +30,7 @@ pub enum Icon {
     Copy,
     Stop,
     Power,
+    Sliders,
 }
 
 impl Icon {
@@ -152,6 +153,12 @@ pub fn paint(p: &Painter, center: Pos2, size: f32, icon: Icon, color: Color32) {
         Icon::Power => {
             poly(&arc(0.0, 0.1, 0.8, -PI * 0.3, PI * 1.3, 18), false);
             line((0.0, -0.95), (0.0, 0.05));
+        }
+        Icon::Sliders => {
+            p.circle_stroke(pt(-0.5, -0.5), 0.3 * h, st);
+            line((-0.15, -0.5), (0.9, -0.5));
+            p.circle_stroke(pt(0.5, 0.5), 0.3 * h, st);
+            line((0.15, 0.5), (-0.9, 0.5));
         }
         Icon::Close => {
             line((-0.7, -0.7), (0.7, 0.7));
