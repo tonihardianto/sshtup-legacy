@@ -1,6 +1,6 @@
 //! The pages of the main window and the edit panel that slides in on the right.
 
-use crate::app::{expand_home, find_scheme, App, Del, Editor};
+use crate::app::{expand_home, find_scheme, App, Del, Editor, Screen};
 use crate::model::*;
 use crate::schemes::SCHEMES;
 use crate::term::rgb;
@@ -54,7 +54,18 @@ enum EdAct {
     GenKey,
 }
 
+/// Which hosts the Hosts screen lists.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum HostFilter {
+    #[default]
+    All,
+    Connected,
+    HasTags,
+}
+
 enum HAct {
+    Sftp(u64),
+    Pin(u64),
     Connect(u64),
     Edit(u64),
     NewHost,
@@ -536,6 +547,14 @@ impl App {
                 }
             }
         });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            for (f, text) in [(HostFilter::All, "All"), (HostFilter::Connected, "Connected"), (HostFilter::HasTags, "Has tags")] {
+                if ui.add(egui::Button::new(RichText::new(text).size(12.5)).selected(self.host_filter == f).corner_radius(14)).clicked() {
+                    self.host_filter = f;
+                }
+            }
+        });
         ui.add_space(8.0);
 
         let looks_quick = !q.is_empty() && (q.contains('@') || q.starts_with("ssh "));
@@ -548,20 +567,32 @@ impl App {
         }
 
         let grid = self.vault.settings.grid_layout;
+        let live_ids: std::collections::HashSet<u64> = self.tabs.iter().filter(|t| t.sess.is_alive()).filter_map(|t| t.sess.spec.host_id).collect();
+        let filter = self.host_filter;
+        let passes = |h: &Host| match filter {
+            HostFilter::All => true,
+            HostFilter::Connected => live_ids.contains(&h.id),
+            HostFilter::HasTags => !h.tags.is_empty(),
+        };
+        let sort = |v: &mut Vec<Host>, by: &str| match by {
+            "Name" => v.sort_by_key(|h| h.display_label().to_lowercase()),
+            _ => v.sort_by_key(|h| std::cmp::Reverse(h.last_used)),
+        };
+        // a pinned host is listed once, in Pinned; searching lists every match in one place
         let mut hosts: Vec<Host> = self
             .vault
             .hosts
             .iter()
-            .filter(|h| if q.is_empty() { h.group == self.cur_group } else { h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q) || h.tags.iter().any(|t| t.to_lowercase().contains(&q)) })
+            .filter(|h| passes(h))
+            .filter(|h| if q.is_empty() { h.group == self.cur_group && !h.pinned } else { h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q) || h.tags.iter().any(|t| t.to_lowercase().contains(&q)) })
             .cloned()
             .collect();
-        match self.vault.settings.sort_by.as_str() {
-            "Name" => hosts.sort_by_key(|h| h.display_label().to_lowercase()),
-            _ => hosts.sort_by_key(|h| std::cmp::Reverse(h.last_used)),
-        }
-        let groups: Vec<Group> = if q.is_empty() { self.vault.groups.iter().filter(|g| g.parent == self.cur_group).cloned().collect() } else { vec![] };
+        sort(&mut hosts, &self.vault.settings.sort_by);
+        let mut pinned: Vec<Host> = if q.is_empty() { self.vault.hosts.iter().filter(|h| h.pinned && passes(h)).cloned().collect() } else { vec![] };
+        sort(&mut pinned, &self.vault.settings.sort_by);
+        let groups: Vec<Group> = if q.is_empty() && filter == HostFilter::All { self.vault.groups.iter().filter(|g| g.parent == self.cur_group).cloned().collect() } else { vec![] };
 
-        if hosts.is_empty() && groups.is_empty() && !looks_quick {
+        if hosts.is_empty() && pinned.is_empty() && groups.is_empty() && !looks_quick {
             if self.vault.hosts.is_empty() && self.vault.groups.is_empty() {
                 empty_state(ui, "No hosts yet", "Add your first host with \"+ New Host\", or type user@address above and press Enter.");
             } else {
@@ -577,6 +608,10 @@ impl App {
             let cols = if grid { ((avail + 10.0) / 270.0).floor().max(1.0) } else { 1.0 };
             let w = ((avail - 10.0 * (cols - 1.0)) / cols).floor() - 1.0;
             let size = Vec2::new(w, if grid { 64.0 } else { 54.0 });
+            if !pinned.is_empty() {
+                section_title(ui, "Pinned");
+                self.host_cards(ui, &pinned, w, &live_ids, &mut acts);
+            }
             if !groups.is_empty() {
                 section_title(ui, "Groups");
                 ui.horizontal_wrapped(|ui| {
@@ -593,39 +628,30 @@ impl App {
             }
             if !hosts.is_empty() {
                 section_title(ui, "Hosts");
-                ui.horizontal_wrapped(|ui| {
-                    for h in &hosts {
-                        let letter = h.display_label().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-                        let live = self.tabs.iter().any(|t| t.sess.spec.host_id == Some(h.id) && t.sess.is_alive());
-                        let (c, e) = item_card(ui, size, &h.display_label(), &format!("{}{}", h.description(&self.vault.identities), self.team_tag("host", h.id)), &letter, icon_color(&h.address), if live { Some(GREEN) } else { None }, "Edit", 40.0, self.selected == Some(h.id));
-                        if e.clicked() {
-                            acts.push(HAct::Edit(h.id));
-                        } else if c.clicked() {
-                            acts.push(HAct::Connect(h.id));
-                        }
-                        c.context_menu(|ui| {
-                            if ui.button("Connect").clicked() {
-                                acts.push(HAct::Connect(h.id));
-                                ui.close();
-                            }
-                            if ui.button("Edit").clicked() {
-                                acts.push(HAct::Edit(h.id));
-                                ui.close();
-                            }
-                            if ui.button("Duplicate").clicked() {
-                                acts.push(HAct::Dup(h.id));
-                                ui.close();
-                            }
-                            if ui.button("Delete").clicked() {
-                                acts.push(HAct::Del(h.id));
-                                ui.close();
-                            }
-                        });
-                    }
-                });
+                self.host_cards(ui, &hosts, w, &live_ids, &mut acts);
             }
         });
         self.apply_host_acts(acts);
+    }
+
+    fn host_cards(&self, ui: &mut egui::Ui, hosts: &[Host], w: f32, live_ids: &std::collections::HashSet<u64>, acts: &mut Vec<HAct>) {
+        use crate::hostcard::{host_card, CardAct, HostCardIn};
+        ui.horizontal_wrapped(|ui| {
+            for h in hosts {
+                let color = h.group.and_then(|g| self.vault.groups.iter().find(|x| x.id == g)).map(|g| icon_color(&g.name)).unwrap_or_else(|| icon_color(&h.address));
+                let team = self.team_tag("host", h.id).trim().trim_start_matches('·').trim().to_string();
+                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), selected: self.selected == Some(h.id), team };
+                match host_card(ui, w, &c) {
+                    CardAct::None => {}
+                    CardAct::Open => acts.push(HAct::Connect(h.id)),
+                    CardAct::Sftp => acts.push(HAct::Sftp(h.id)),
+                    CardAct::Edit => acts.push(HAct::Edit(h.id)),
+                    CardAct::Duplicate => acts.push(HAct::Dup(h.id)),
+                    CardAct::Pin => acts.push(HAct::Pin(h.id)),
+                    CardAct::Delete => acts.push(HAct::Del(h.id)),
+                }
+            }
+        });
     }
 
     /// A small window asking for a session code; Join opens the shared terminal in a new tab.
@@ -733,6 +759,19 @@ impl App {
                 HAct::Connect(id) => {
                     self.selected = Some(id);
                     self.connect_host(id);
+                }
+                HAct::Sftp(id) => {
+                    if let Some(h) = self.vault.host(Some(id)).cloned() {
+                        self.screen = Screen::Sftp;
+                        let ctx = self.ctx.clone();
+                        self.sftp_open(&h, &ctx);
+                    }
+                }
+                HAct::Pin(id) => {
+                    if let Some(h) = self.vault.hosts.iter_mut().find(|h| h.id == id) {
+                        h.pinned = !h.pinned;
+                        self.dirty = true;
+                    }
                 }
                 HAct::Edit(id) => {
                     if let Some(h) = self.vault.host(Some(id)).cloned() {

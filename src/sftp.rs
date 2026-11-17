@@ -1404,7 +1404,7 @@ impl App {
         RemoteCfg { opts, port: p.port, target: p.target, secret: secret.unwrap_or_default() }
     }
 
-    fn sftp_open(&mut self, h: &Host, ctx: &egui::Context) {
+    pub(crate) fn sftp_open(&mut self, h: &Host, ctx: &egui::Context) {
         crate::model::tighten_known_hosts();
         if let Some(why) = self.connection_problem(h) {
             self.notify(why, RED);
