@@ -53,12 +53,23 @@ pub fn run(addr: &str, share: &str, name: &str, ticket: &str) -> i32 {
         }
     });
     let mut out = std::io::stdout();
+    // set by the app that owns this terminal tab; reports of who is typing are only printed when it is there
+    let secret = std::env::var("SSHTUP_TYPING_SECRET").ok().filter(|s| !s.is_empty());
     while let Some(m) = read_msg(&mut r) {
         match text(&m, "t") {
             "out" => {
                 if let Some(bytes) = open(&key, Dir::Out, text(&m, "d")) {
                     let _ = out.write_all(&bytes);
                     let _ = out.flush();
+                }
+            }
+            kind @ ("typing" | "roster") => {
+                // sealed by the host: who just typed / who is in the session, for the app that owns this tab to draw
+                if let (Some(secret), Some(raw)) = (secret.as_deref(), open(&key, Dir::Out, text(&m, "d"))) {
+                    if let Some(report) = crate::typing_osc::decode(if kind == "typing" { "t" } else { "r" }, &raw) {
+                        let _ = out.write_all(&crate::typing_osc::emit(secret, &report));
+                        let _ = out.flush();
+                    }
                 }
             }
             "ended" => {

@@ -7,6 +7,7 @@ mod icons;
 mod lock;
 mod model;
 mod relay_join;
+mod typing_osc;
 mod schemes;
 mod screens;
 mod sftp;

@@ -55,6 +55,8 @@ pub struct Shared {
     pub tap: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
     /// Who of the guests of a shared terminal typed last, shown under the cursor for a moment.
     pub typing: Mutex<Option<Typing>>,
+    /// In a guest tab: who is in the session (the host first), as the host last said.
+    pub people: Mutex<Vec<(String, [u8; 3])>>,
 }
 
 /// A guest's keystroke seen by the host: shown as a small badge under the cursor.
@@ -95,6 +97,11 @@ impl PtySession {
         }
         cmd.env("TERM", if spec.term_type.is_empty() { "xterm-256color" } else { &spec.term_type });
         cmd.env("COLORTERM", "truecolor");
+        // a guest tab of a shared terminal learns who is typing from its own helper program (see typing_osc)
+        let typing_secret = (spec.args.first().map(|a| a == "--relay-join").unwrap_or(false)).then(crate::typing_osc::new_secret);
+        if let Some(s) = &typing_secret {
+            cmd.env("SSHTUP_TYPING_SECRET", s);
+        }
         if let Ok(home) = std::env::var("HOME") {
             cmd.cwd(home);
         }
@@ -117,6 +124,7 @@ impl PtySession {
             exit_code: Mutex::new(None),
             tap: Mutex::new(None),
             typing: Mutex::new(None),
+            people: Mutex::new(Vec::new()),
             prompt: Mutex::new(None),
             answered_at: Mutex::new(None),
             login_seen: Mutex::new(None),
@@ -146,6 +154,7 @@ impl PtySession {
             let log_path = log_path.clone();
             let log_key = spec.log_key.clone();
             let is_ssh = spec.is_ssh;
+            let mut typing_scan = typing_secret.map(crate::typing_osc::Scan::new);
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16384];
                 let mut tail = String::new();
@@ -163,7 +172,29 @@ impl PtySession {
                     match reader.read(&mut buf) {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            let chunk = &buf[..n];
+                            let scanned;
+                            let chunk: &[u8] = match typing_scan.as_mut() {
+                                Some(scan) => {
+                                    let (clean, seen) = scan.feed(&buf[..n]);
+                                    for report in seen {
+                                        match report {
+                                            crate::typing_osc::Report::Typing(p) => {
+                                                if let Ok(mut t) = shared.typing.lock() {
+                                                    *t = Some(Typing { name: p.name, color: p.color, at: Instant::now() });
+                                                }
+                                            }
+                                            crate::typing_osc::Report::People(v) => {
+                                                if let Ok(mut r) = shared.people.lock() {
+                                                    *r = v.into_iter().map(|p| (p.name, p.color)).collect();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    scanned = clean;
+                                    &scanned
+                                }
+                                None => &buf[..n],
+                            };
                             if let Ok(mut p) = parser.lock() {
                                 p.process(chunk);
                             }

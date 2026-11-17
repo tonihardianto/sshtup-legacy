@@ -468,6 +468,17 @@ impl App {
         self.vault.log_key.as_deref().and_then(crate::vaultcrypt::LogKey::from_hex)
     }
 
+    /// The people to draw as avatars on a tab: the host's own share, or, in a guest tab, whom the host told us about.
+    pub fn people_of(&self, tab_id: u64) -> Vec<(String, Color32)> {
+        let mine = self.collab.people(tab_id);
+        if !mine.is_empty() {
+            return mine;
+        }
+        let Some(t) = self.tabs.iter().find(|t| t.id == tab_id) else { return vec![] };
+        let list = t.sess.shared.people.lock().map(|p| p.clone()).unwrap_or_default();
+        list.into_iter().take(4).map(|(n, c)| (n, Color32::from_rgb(c[0], c[1], c[2]))).collect()
+    }
+
     pub fn open_session(&mut self, mut spec: SessionSpec) {
         if let Some(why) = spec.refused.take() {
             self.notify(why, RED);
@@ -635,7 +646,7 @@ impl App {
                         .map(|t| (t.id, t.title.clone(), if t.sess.shared.alive.load(std::sync::atomic::Ordering::Relaxed) { GREEN } else { RED }))
                         .collect();
                     for (id, title, dot) in ids {
-                        let people = self.collab.people(id);
+                        let people = self.people_of(id);
                         let (c, x, resp) = tab_button_with(ui, &title, self.active == Some(id), true, Some(dot), None, &people);
                         let act = std::cell::Cell::new(crate::collab::CollabAct::None);
                         let sh = self.collab.shares.iter().find(|s| s.tab_id == id).cloned();
@@ -746,7 +757,7 @@ impl App {
         };
         let bell = self.tabs[idx].sess.shared.bell.load(std::sync::atomic::Ordering::Relaxed);
         let share = self.collab.shares.iter().find(|s| s.tab_id == tab_id).cloned();
-        let people = self.collab.people(tab_id);
+        let people = self.people_of(tab_id);
         let mut card_collab: Option<crate::collab::CollabAct> = None;
 
         Frame::new().fill(rgb_c(scheme.background)).show(ui, |ui| {

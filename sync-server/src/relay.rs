@@ -256,6 +256,11 @@ fn host(reader: &mut BufReader<TcpStream>, tx: SyncSender<Value>, sessions: &Ses
                 let msg = json!({"t":"out","d":text(&m,"d")});
                 s.guests.retain(|g| !g.active || g.tx.try_send(msg.clone()).is_ok());
             }
+            kind @ ("typing" | "roster") => {
+                // sealed by the host: who just typed / who is in the session, for the guests' windows to show
+                let msg = json!({"t":kind,"d":text(&m,"d")});
+                s.guests.retain(|g| !g.active || g.tx.try_send(msg.clone()).is_ok());
+            }
             "snap" => {
                 let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
                 if let Some(g) = s.guests.iter_mut().find(|g| g.id == gid) {
@@ -417,6 +422,12 @@ mod tests {
         assert_eq!(text(&m, "t"), "in");
         assert_eq!(m["gid"].as_u64(), Some(gid), "the host is told who typed");
         assert_eq!(unhex(text(&m, "d")), b"y");
+
+        // who typed is passed to the guests as it is (sealed by the host)
+        send(&mut hw, &json!({"t":"typing","d":hex(b"who")})).unwrap();
+        let m = read_msg(&mut gr).unwrap();
+        assert_eq!(text(&m, "t"), "typing");
+        assert_eq!(unhex(text(&m, "d")), b"who");
 
         // ending the session tells the guest
         send(&mut hw, &json!({"t":"end"})).unwrap();
