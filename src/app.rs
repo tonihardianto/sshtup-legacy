@@ -24,7 +24,8 @@ pub enum Screen {
 }
 
 impl Screen {
-    pub const NAV: [Screen; 8] = [Screen::Hosts, Screen::Keychain, Screen::PortForwarding, Screen::Snippets, Screen::KnownHosts, Screen::Logs, Screen::Sftp, Screen::Collaboration];
+    /// The sidebar, in order; Known Hosts starts the "More" part.
+    pub const NAV: [Screen; 8] = [Screen::Hosts, Screen::Keychain, Screen::PortForwarding, Screen::Snippets, Screen::Sftp, Screen::KnownHosts, Screen::Logs, Screen::Collaboration];
     pub fn title(self) -> &'static str {
         match self {
             Screen::Hosts => "Hosts",
@@ -104,6 +105,9 @@ pub struct TermTab {
     /// What is typed in the password window, and whether to keep it on the host.
     pub pw_text: String,
     pub pw_remember: bool,
+    /// Bells already answered (sound or flash), and when the last flash started.
+    pub bell_seen: u64,
+    pub bell_flash: Option<Instant>,
 }
 
 pub struct ShotState {
@@ -136,6 +140,12 @@ pub struct App {
     pub confirm: Option<Del>,
     pub confirm_import: bool,
     pub settings_tab: u8,
+    /// What is typed in the Settings search box.
+    pub settings_query: String,
+    /// "Clear history…" was pressed once; the next press clears.
+    pub clear_armed: bool,
+    /// The terminal font the `term` font family was last built with.
+    pub term_font: String,
     pub host_picker: Option<String>,
     pub sftp: crate::sftp::SftpState,
     pub collab: crate::collab::CollabState,
@@ -257,6 +267,8 @@ impl App {
             vault = demo_vault();
             vault.settings = settings;
         }
+        crate::fonts::apply(&cc.egui_ctx, &vault.settings.font_family);
+        let term_font = vault.settings.font_family.clone();
         let mut app = App {
             ctx: cc.egui_ctx.clone(),
             vault,
@@ -279,6 +291,9 @@ impl App {
             confirm: None,
             confirm_import: false,
             settings_tab: 0,
+            settings_query: String::new(),
+            clear_armed: false,
+            term_font,
             host_picker: None,
             sftp: Default::default(),
             show_snippets_menu: false,
@@ -494,7 +509,7 @@ impl App {
             Ok(sess) => {
                 let id = self.next_tab;
                 self.next_tab += 1;
-                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false });
+                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false, bell_seen: 0, bell_flash: None });
                 self.active = Some(id);
             }
             Err(e) => self.notify(format!("Could not start: {}", e), RED),
@@ -702,6 +717,10 @@ impl App {
                 });
                 ui.add_space(14.0);
                 for s in Screen::NAV {
+                    if s == Screen::KnownHosts {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new("MORE").size(10.5).color(MUTED.linear_multiply(0.8)));
+                    }
                     self.nav_item(ui, s);
                 }
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
@@ -739,6 +758,31 @@ impl App {
             self.active = None;
             return;
         };
+        // Cmd/Ctrl + and - change the terminal's font size (instead of zooming the whole window), 0 sets it back.
+        let zoom = ui.input_mut(|i| {
+            use egui::{Key, KeyboardShortcut as K, Modifiers as M};
+            if i.consume_shortcut(&K::new(M::COMMAND, Key::Num0)) {
+                Some(0.0)
+            } else if i.consume_shortcut(&K::new(M::COMMAND, Key::Plus)) || i.consume_shortcut(&K::new(M::COMMAND, Key::Equals)) {
+                Some(1.0)
+            } else if i.consume_shortcut(&K::new(M::COMMAND, Key::Minus)) {
+                Some(-1.0)
+            } else {
+                None
+            }
+        });
+        if let Some(step) = zoom {
+            let spec_size = &mut self.tabs[idx].sess.spec.font_size;
+            // a host with its own size changes for this tab only; otherwise the setting changes (and is saved)
+            let size = match spec_size {
+                Some(f) => f,
+                None => {
+                    self.dirty = true;
+                    &mut self.vault.settings.font_size
+                }
+            };
+            *size = if step == 0.0 { DEFAULT_FONT_SIZE } else { (size.round() + step).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE) };
+        }
         let s = self.vault.settings.clone();
         let (scheme, fsize) = {
             let t = &self.tabs[idx];
@@ -767,7 +811,7 @@ impl App {
         let mut card_collab: Option<crate::collab::CollabAct> = None;
 
         Frame::new().fill(rgb_c(scheme.background)).show(ui, |ui| {
-            let opts = TermOptions { scheme, font_size: fsize, brighten_bold: s.brighten_bold_text, option_is_meta: s.option_is_meta, right_click_paste: s.right_click_to_paste, ac: if s.autocomplete { Some(crate::autocomplete::AcSource { history: &ac_hist, snippets: &ac_snips }) } else { None } };
+            let opts = TermOptions { scheme, font_size: fsize, line_height: s.line_height, cursor_shape: &s.cursor_shape, cursor_blink: s.cursor_blink, brighten_bold: s.brighten_bold_text, option_is_meta: s.option_is_meta, right_click_paste: s.right_click_to_paste, ac: if s.autocomplete { Some(crate::autocomplete::AcSource { history: &ac_hist, snippets: &ac_snips }) } else { None } };
             let focus = std::mem::take(&mut self.tabs[idx].focus_next);
             let tab = &mut self.tabs[idx];
             let area = ui.available_rect_before_wrap();
@@ -798,6 +842,24 @@ impl App {
             } else {
                 terminal_ui(ui, egui::Id::new(("term", tab_id)), &mut tab.sess, &mut tab.view, &opts, focus);
                 new_cmds.append(&mut tab.view.ac.new_commands);
+                // the bell: a short system sound, or a quick flash of the terminal
+                if bell > tab.bell_seen {
+                    tab.bell_seen = bell;
+                    match s.bell_mode() {
+                        "sound" => ring_bell(),
+                        "flash" => tab.bell_flash = Some(Instant::now()),
+                        _ => {}
+                    }
+                }
+                if let Some(t) = tab.bell_flash {
+                    let k = t.elapsed().as_secs_f32() / 0.2;
+                    if k < 1.0 {
+                        ui.painter().rect_filled(area, 0.0, Color32::from_white_alpha(((1.0 - k) * 70.0) as u8));
+                        ui.ctx().request_repaint();
+                    } else {
+                        tab.bell_flash = None;
+                    }
+                }
             }
             if let Some(ap) = ap {
                 // the host wants a password that is not saved (or was refused): ask in a window
@@ -838,7 +900,7 @@ impl App {
             // (a hidden card still comes back when the connection is lost: it holds the Reconnect button)
             let corner = crate::card::Corner::from_setting(&s.card_position);
             if !covered && (corner.is_some() || !alive) {
-                let c = crate::card::CardIn { corner: corner.unwrap_or(crate::card::Corner::TopRight), tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people, can_share };
+                let c = crate::card::CardIn { corner: corner.unwrap_or(crate::card::Corner::TopRight), tab_id, alive, bell: s.bell_mode() != "off" && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people, can_share };
                 let a = crate::card::session_card(ui.ctx(), area, &mut tab.card_pinned, &c);
                 if a.disconnect {
                     tab.sess.kill();
@@ -1078,6 +1140,39 @@ impl App {
     }
 }
 
+/// Plays the system's alert sound, at most a few times a second (a program can ring many bells at once).
+fn ring_bell() {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    if let Ok(mut last) = LAST.lock() {
+        if last.map(|t| t.elapsed() < Duration::from_millis(250)).unwrap_or(false) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    use std::process::{Command, Stdio};
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut c = Command::new("afplay");
+        c.arg("/System/Library/Sounds/Tink.aiff");
+        c
+    } else if cfg!(target_os = "windows") {
+        let mut c = Command::new("powershell");
+        c.args(["-NoProfile", "-Command", "[System.Media.SystemSounds]::Beep.Play()"]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            c.creation_flags(0x0800_0000); // no console window
+        }
+        c
+    } else {
+        let mut c = Command::new("canberra-gtk-play");
+        c.args(["-i", "bell"]);
+        c
+    };
+    if let Ok(mut child) = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        std::thread::spawn(move || child.wait());
+    }
+}
+
 pub fn rgb_c(c: u32) -> Color32 {
     crate::term::rgb(c)
 }
@@ -1089,6 +1184,12 @@ impl eframe::App for App {
             return;
         }
         self.sync_poll(&ctx);
+        if self.term_font != self.vault.settings.font_family {
+            self.term_font = self.vault.settings.font_family.clone();
+            if !crate::fonts::apply(&ctx, &self.term_font) {
+                self.notify(format!("Could not read the font {}; using {}", self.term_font, crate::fonts::BUILT_IN), AMBER);
+            }
+        }
         // background rule sessions: drop dead ones' processes after reporting
         let dead: Vec<u64> = self.forwards_live.iter().filter(|(_, s)| !s.is_alive()).map(|(k, _)| *k).collect();
         for id in dead {

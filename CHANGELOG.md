@@ -5,6 +5,14 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+- Settings: a new layout with a search box, underlined tabs and cards of settings, each with **Reset to defaults**. The
+  Terminal tab has a preview that follows every change (the scheme's 16 colors show their names on hover).
+- Terminal: pick the **font** from the monospace fonts installed on the computer (Hack stays built in), set the **line
+  height** (1.0, 1.2 or 1.4) and the **cursor** (block, bar or underline; blinking or steady).
+- Terminal: **Bell** is now Off, Sound (the system alert) or Flash. A saved "Bell sound" setting becomes Sound.
+- Terminal: Ctrl + and Ctrl − (Cmd on a Mac) change the font size, Ctrl 0 sets it back. A host with its own size changes
+  for that tab only.
+- The sidebar groups Known Hosts, Logs and Collaboration under **More**.
 - Icons: the interface now uses Lucide icons (rounder and lighter than the hand-drawn ones). Their licence is in
   `LICENSES/lucide.txt`.
 - Hosts: a new top bar with one search box (press Ctrl+K, or Cmd+K on a Mac, to jump to it), a grid/list switch and a

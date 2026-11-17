@@ -189,8 +189,18 @@ impl Snippet {
 pub struct Settings {
     pub color_scheme: String,
     pub font_size: f32,
+    /// Terminal font by name (see `fonts.rs`); empty = the built-in Hack.
+    pub font_family: String,
+    /// Height of a terminal row, as a multiple of the font's own line height.
+    pub line_height: f32,
+    /// "block", "bar" or "underline".
+    pub cursor_shape: String,
+    pub cursor_blink: bool,
     pub scrollback: usize,
+    /// Older setting, read only when `bell` is empty (settings saved before Off / Sound / Flash existed).
     pub bell_sound: bool,
+    /// "off", "sound" or "flash"; empty = follow `bell_sound`.
+    pub bell: String,
     /// Where the floating card sits on a terminal: top-right, top-left, bottom-right, bottom-left or hidden.
     pub card_position: String,
     pub option_is_meta: bool,
@@ -212,8 +222,13 @@ impl Default for Settings {
         Self {
             color_scheme: DEFAULT_SCHEME.into(),
             font_size: DEFAULT_FONT_SIZE,
+            font_family: String::new(),
+            line_height: 1.0,
+            cursor_shape: "block".into(),
+            cursor_blink: true,
             scrollback: DEFAULT_SCROLLBACK,
             bell_sound: false,
+            bell: String::new(),
             card_position: "top-right".into(),
             option_is_meta: false,
             right_click_to_paste: false,
@@ -227,6 +242,17 @@ impl Default for Settings {
             default_editor: "system".into(),
             autocomplete: true,
             remote_history: true,
+        }
+    }
+}
+
+impl Settings {
+    /// What the terminal does on a bell: "off", "sound" or "flash".
+    pub fn bell_mode(&self) -> &str {
+        match self.bell.as_str() {
+            "sound" | "flash" | "off" => &self.bell,
+            _ if self.bell_sound => "sound",
+            _ => "off",
         }
     }
 }
