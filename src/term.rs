@@ -944,16 +944,17 @@ mod auth_tests {
 
     #[test]
     fn a_slow_refusal_asks_again_every_time() {
-        // the host waits 3.5 s before refusing, twice, and prints the refusal before the next prompt
+        // the host waits 3.5 s before refusing, twice, and prints the refusal before the next prompt.
+        // Each wait allows 30 s: a busy CI machine can be several times slower than this one.
         let script = "printf \"me@host's password: \"; read -r a; sleep 3.5; printf '\\r\\nPermission denied, please try again.\\r\\n'; sleep 0.3; printf 'me@host password: '; read -r b; sleep 3.5; printf '\\r\\nPermission denied, please try again.\\r\\n'; sleep 0.3; printf 'me@host password: '; read -r c; echo got:$c";
         let s = PtySession::spawn(spec(script), egui::Context::default(), 24, 80).unwrap();
         let p = wait_prompt(&s).expect("first prompt");
         assert!(!p.wrong);
         s.submit_auth("bad1");
-        let p = wait_long(&s, 100).expect("second prompt");
+        let p = wait_long(&s, 300).expect("second prompt");
         assert!(p.wrong);
         s.submit_auth("bad2");
-        let p = wait_long(&s, 100).expect("third prompt");
+        let p = wait_long(&s, 300).expect("third prompt");
         assert!(p.wrong);
         // a refusal is never taken for a login
         assert!(s.shared.login_seen.lock().unwrap().is_none());
