@@ -5,6 +5,8 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+- Icons: the interface now uses Lucide icons (rounder and lighter than the hand-drawn ones). Their licence is in
+  `LICENSES/lucide.txt`.
 - Hosts: a new top bar with one search box (press Ctrl+K, or Cmd+K on a Mac, to jump to it), a grid/list switch and a
   **New Host** button whose menu holds New Group, Import ~/.ssh/config, Local terminal and Join shared session.
 - Shared terminals: a guest's window now shows who is in the session (avatars on the tab and the card) and a badge under
