@@ -32,6 +32,10 @@ pub enum Icon {
     Sliders,
     List,
     FolderPlus,
+    Pencil,
+    Pin,
+    PinOff,
+    Trash,
 }
 
 impl Icon {

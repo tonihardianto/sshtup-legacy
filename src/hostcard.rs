@@ -96,14 +96,22 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
     ui.set_min_width(150.0);
     ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
     ui.spacing_mut().item_spacing.y = 2.0;
-    let pin = if h.pinned { "Unpin" } else { "Pin to top" };
-    let mut items: Vec<(&str, CardAct)> = vec![("Connect", CardAct::Open)];
+    let (pin, pin_icon) = if h.pinned { ("Unpin", Icon::PinOff) } else { ("Pin to top", Icon::Pin) };
+    let mut items: Vec<(Icon, &str, CardAct)> = vec![(Icon::Terminal, "Connect", CardAct::Open)];
     if h.protocol == Protocol::Ssh {
-        items.push(("Open SFTP", CardAct::Sftp));
+        items.push((Icon::Folder, "Open SFTP", CardAct::Sftp));
     }
-    items.extend([("Edit", CardAct::Edit), ("Duplicate", CardAct::Duplicate), (pin, CardAct::Pin), ("Delete", CardAct::Delete)]);
-    for (text, a) in items {
-        if ui.button(text).clicked() {
+    items.extend([(Icon::Pencil, "Edit", CardAct::Edit), (Icon::Copy, "Duplicate", CardAct::Duplicate), (pin_icon, pin, CardAct::Pin), (Icon::Trash, "Delete", CardAct::Delete)]);
+    for (icon, text, a) in items {
+        let clicked = if a == CardAct::Delete {
+            // a soft red field marks the one item that destroys something
+            let r = ui.add(egui::Button::new(egui::RichText::new(format!("       {text}")).size(12.5).color(RED)).fill(RED.linear_multiply(0.14)).corner_radius(6).min_size(Vec2::new(0.0, 32.0)));
+            icons::paint(ui.painter(), Pos2::new(r.rect.left() + 20.0, r.rect.center().y), 14.0, icon, RED);
+            r.clicked()
+        } else {
+            icon_text_button(ui, icon, text).clicked()
+        };
+        if clicked {
             *act = a;
             ui.close();
         }
@@ -153,7 +161,7 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         });
         right_edge = more_rect.left() - 2.0;
         let mut open = false;
-        egui::Popup::menu(&more).show(|ui| {
+        egui::Popup::menu(&more).gap(6.0).show(|ui| {
             open = true;
             menu_items(ui, h, &mut act);
         });

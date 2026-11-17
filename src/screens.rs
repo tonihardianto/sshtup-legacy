@@ -545,7 +545,7 @@ impl App {
             if main.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 acts.push(HAct::NewHost);
             }
-            egui::Popup::menu(&arrow.on_hover_cursor(egui::CursorIcon::PointingHand)).show(|ui| {
+            egui::Popup::menu(&arrow.on_hover_cursor(egui::CursorIcon::PointingHand)).gap(6.0).align(egui::RectAlign::BOTTOM_END).show(|ui| {
                 ui.set_min_width(190.0);
                 ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
                 ui.spacing_mut().item_spacing.y = 2.0;
