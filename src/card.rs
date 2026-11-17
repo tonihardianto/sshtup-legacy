@@ -3,7 +3,8 @@
 //! it, when it is clicked, and by itself when the connection is lost. It replaces a toolbar row,
 //! so the terminal gets the whole height.
 
-use crate::collab::{collab_items, CollabAct, Share};
+use crate::collab::{CollabAct, Share};
+use crate::icons::Icon;
 use crate::model::Snippet;
 use crate::ui::*;
 use eframe::egui::{self, Align2, Color32, Frame, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
@@ -59,6 +60,47 @@ pub struct CardIn<'a> {
     pub people: &'a [(String, Color32)],
 }
 
+const ROW_H: f32 = 34.0;
+
+/// A full-width row: an icon and a label, lit when the pointer is on it.
+fn row(ui: &mut egui::Ui, icon: Icon, label: &str, color: Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 8.0, Color32::from_white_alpha(14));
+    }
+    crate::icons::paint(ui.painter(), Pos2::new(rect.left() + 17.0, rect.center().y), 15.0, icon, MUTED);
+    ui.painter().text(Pos2::new(rect.left() + 38.0, rect.center().y), Align2::LEFT_CENTER, label, egui::FontId::proportional(14.0), color);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// "Code  k7m2-9xqa" with a copy icon; a click copies the code.
+fn code_row(ui: &mut egui::Ui, code: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 8.0, Color32::from_white_alpha(14));
+    }
+    let y = rect.center().y;
+    ui.painter().text(Pos2::new(rect.left() + 12.0, y), Align2::LEFT_CENTER, "Code", egui::FontId::proportional(14.0), MUTED);
+    ui.painter().text(Pos2::new(rect.left() + 58.0, y), Align2::LEFT_CENTER, code, egui::FontId::monospace(14.0), TEXT);
+    crate::icons::paint(ui.painter(), Pos2::new(rect.right() - 16.0, y), 15.0, Icon::Copy, MUTED);
+    resp.on_hover_text("Copy the session code").on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A guest: avatar, name and a switch for whether they may type. True when the switch was moved.
+fn guest_row(ui: &mut egui::Ui, g: &crate::collab_net::GuestInfo, on: &mut bool) -> bool {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_H), Sense::hover());
+    let y = rect.center().y;
+    let c = crate::collab_net::guest_color(g.gid);
+    avatar(ui.painter(), Pos2::new(rect.left() + 17.0, y), 10.0, &g.name, Color32::from_rgb(c[0], c[1], c[2]));
+    ui.painter().text(Pos2::new(rect.left() + 38.0, y), Align2::LEFT_CENTER, &g.name, egui::FontId::proportional(14.0), TEXT);
+    let slot = Rect::from_min_max(Pos2::new(rect.right() - 48.0, rect.top()), Pos2::new(rect.right() - 6.0, rect.bottom()));
+    let mut changed = false;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(slot).layout(egui::Layout::right_to_left(egui::Align::Center)), |ui| {
+        changed = toggle(ui, on).on_hover_text(if *on { "Can type" } else { "View only" }).changed();
+    });
+    changed
+}
+
 /// Draws the card in the top right corner of `area`. `pinned` is whether a click has opened it.
 pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &CardIn) -> CardAct {
     let mut act = CardAct::default();
@@ -91,7 +133,7 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                 .inner_margin(Margin::symmetric(11, 6))
                 .show(ui, |ui| {
                     if open {
-                        ui.set_min_width(190.0);
+                        ui.set_min_width(230.0);
                     }
                     let head = ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
@@ -109,6 +151,9 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                                 avatar(ui.painter(), Pos2::new(r.left() + 9.0 + 14.0 * i as f32, r.center().y), 9.0, name, *col);
                             }
                         }
+                        if open && c.share.is_some() {
+                            ui.label(RichText::new("Sharing").size(13.0).color(GREEN));
+                        }
                     });
                     if ui.interact(head.response.rect, id.with("head"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         *pinned = !*pinned;
@@ -121,7 +166,10 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                                 act.reconnect = true;
                             }
                         } else {
-                            ui.menu_button("Snippets", |ui| {
+                            // one flat card: no menus inside menus (the snippet list is the only pop-up)
+                            let r = row(ui, Icon::Snippet, "Snippets", TEXT);
+                            egui::Popup::menu(&r).show(|ui| {
+                                ui.set_min_width(180.0);
                                 if c.snippets.is_empty() {
                                     label_muted(ui, "No snippets yet");
                                 }
@@ -132,13 +180,29 @@ pub fn session_card(ctx: &egui::Context, area: Rect, pinned: &mut bool, c: &Card
                                     }
                                 }
                             });
-                            ui.menu_button(RichText::new(if c.share.is_some() { "Sharing" } else { "Share" }).color(if c.share.is_some() { GREEN } else { TEXT }), |ui| {
-                                let a = collab_items(ui, c.share);
-                                if a != CollabAct::None {
-                                    act.collab = Some(a);
+                            match c.share {
+                                None => {
+                                    if row(ui, Icon::Users, "Share this terminal", TEXT).clicked() {
+                                        act.collab = Some(CollabAct::Start);
+                                    }
                                 }
-                            });
-                            if ui.button("Disconnect").clicked() {
+                                Some(s) => {
+                                    if code_row(ui, &s.code()).clicked() {
+                                        act.collab = Some(CollabAct::CopyCode);
+                                    }
+                                    ui.separator();
+                                    for g in s.guests() {
+                                        let mut on = g.can_type;
+                                        if guest_row(ui, &g, &mut on) {
+                                            act.collab = Some(CollabAct::GuestType(g.gid, on));
+                                        }
+                                    }
+                                    if row(ui, Icon::Stop, "Stop sharing", TEXT).clicked() {
+                                        act.collab = Some(CollabAct::Stop);
+                                    }
+                                }
+                            }
+                            if row(ui, Icon::Power, "Disconnect", TEXT).clicked() {
                                 act.disconnect = true;
                             }
                         }
