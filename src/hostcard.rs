@@ -94,6 +94,8 @@ fn icon_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, draw: impl FnOnce(&e
 
 fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
     ui.set_min_width(150.0);
+    ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
+    ui.spacing_mut().item_spacing.y = 2.0;
     let pin = if h.pinned { "Unpin" } else { "Pin to top" };
     let mut items: Vec<(&str, CardAct)> = vec![("Connect", CardAct::Open)];
     if h.protocol == Protocol::Ssh {
