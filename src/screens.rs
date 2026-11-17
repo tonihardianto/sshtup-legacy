@@ -488,9 +488,31 @@ impl App {
     pub fn screen_hosts(&mut self, ui: &mut egui::Ui) {
         let mut acts: Vec<HAct> = vec![];
         let q = self.search.trim().to_lowercase();
+        // one row: search, grid/list switch, and New Host with its menu
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)) {
+            self.focus_search = true;
+        }
         ui.horizontal(|ui| {
-            let w = (ui.available_width() - 250.0).max(180.0);
-            let r = ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Find a host or ssh user@hostname -p 22").desired_width(w).margin(Vec2::new(10.0, 8.0)));
+            ui.spacing_mut().item_spacing.x = 10.0;
+            let w = (ui.available_width() - 216.0).max(180.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 38.0), Sense::hover());
+            let hint = if cfg!(target_os = "macos") { "Cmd K" } else { "Ctrl K" };
+            let hint_galley = ui.painter().layout_no_wrap(hint.into(), FontId::monospace(11.5), MUTED);
+            let hint_w = hint_galley.size().x + 14.0;
+            let inner = Rect::from_min_max(rect.min + Vec2::new(40.0, 0.0), rect.max - Vec2::new(hint_w + 18.0, 0.0));
+            let search_id = egui::Id::new("hosts-search");
+            let focused = ui.memory(|m| m.has_focus(search_id));
+            ui.painter().rect(rect, 8.0, CARD, egui::Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE } else { BORDER }), egui::StrokeKind::Inside);
+            let mut edit_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
+            let r = edit_ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::new("hosts-search")).frame(Frame::NONE).hint_text("Search by name, user or IP, or type ssh user@host -p 22").desired_width(inner.width()).margin(Vec2::new(0.0, 0.0)).vertical_align(egui::Align::Center).min_size(Vec2::new(0.0, 38.0)));
+            if std::mem::take(&mut self.focus_search) {
+                r.request_focus();
+            }
+            crate::icons::paint(ui.painter(), Pos2::new(rect.left() + 20.0, rect.center().y), 15.0, crate::icons::Icon::Search, MUTED);
+            let chip = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - hint_w / 2.0, rect.center().y), Vec2::new(hint_w, 22.0));
+            ui.painter().rect(chip, 5.0, Color32::from_rgb(0x1B, 0x1E, 0x30), egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+            ui.painter().galley(Pos2::new(chip.left() + 7.0, chip.center().y - hint_galley.size().y / 2.0), hint_galley, MUTED);
+
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if enter && !q.is_empty() {
                 let matching: Vec<u64> = self.vault.hosts.iter().filter(|h| h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q)).map(|h| h.id).collect();
@@ -500,31 +522,55 @@ impl App {
                     acts.push(HAct::Quick(self.search.trim().to_string()));
                 }
             }
-            if primary_button(ui, "+ New Host").clicked() {
+
+            // grid / list switch (the active one is filled)
+            let (sw, _) = ui.allocate_exact_size(Vec2::new(70.0, 38.0), Sense::hover());
+            ui.painter().rect(sw, 8.0, CARD, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+            for (i, (icon, grid_mode, tip)) in [(crate::icons::Icon::Group, true, "Grid"), (crate::icons::Icon::List, false, "List")].into_iter().enumerate() {
+                let cell = Rect::from_min_size(sw.min + Vec2::new(4.0 + i as f32 * 31.0, 4.0), Vec2::new(30.0, 30.0));
+                let on = self.vault.settings.grid_layout == grid_mode;
+                let resp = ui.interact(cell, egui::Id::new(("hosts-layout", i)), Sense::click()).on_hover_text(tip);
+                if on || resp.hovered() {
+                    ui.painter().rect_filled(cell, 6.0, if on { BORDER } else { CARD_HOVER });
+                }
+                crate::icons::paint(ui.painter(), cell.center(), 14.0, icon, if on { TEXT } else { MUTED });
+                if resp.clicked() && !on {
+                    self.vault.settings.grid_layout = grid_mode;
+                    self.dirty = true;
+                }
+            }
+
+            // New Host, with the rarer actions in its menu
+            let label = ui.painter().layout_no_wrap("+  New Host".into(), FontId::proportional(13.0), Color32::WHITE);
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let (main_rect, main) = ui.allocate_exact_size(Vec2::new(label.size().x + 30.0, 38.0), Sense::click());
+            let (arrow_rect, arrow) = ui.allocate_exact_size(Vec2::new(32.0, 38.0), Sense::click());
+            let ctl = |r: &egui::Response, base: Color32| if r.hovered() { base.linear_multiply(1.15) } else { base };
+            ui.painter().rect_filled(main_rect, egui::CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, ctl(&main, BLUE));
+            ui.painter().rect_filled(arrow_rect, egui::CornerRadius { nw: 0, sw: 0, ne: 8, se: 8 }, ctl(&arrow, BLUE));
+            ui.painter().line_segment([arrow_rect.left_top() + Vec2::new(0.0, 7.0), arrow_rect.left_bottom() - Vec2::new(0.0, 7.0)], egui::Stroke::new(1.0, Color32::from_white_alpha(70)));
+            ui.painter().galley(Pos2::new(main_rect.left() + 15.0, main_rect.center().y - label.size().y / 2.0), label, Color32::WHITE);
+            crate::icons::paint(ui.painter(), arrow_rect.center() + Vec2::new(1.0, 0.0), 12.0, crate::icons::Icon::ChevDown, Color32::WHITE);
+            if main.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 acts.push(HAct::NewHost);
             }
-            if flat_button(ui, "New Group").clicked() {
-                acts.push(HAct::NewGroup);
-            }
-            let layout_txt = if self.vault.settings.grid_layout { "List" } else { "Grid" };
-            if flat_button(ui, layout_txt).clicked() {
-                self.vault.settings.grid_layout = !self.vault.settings.grid_layout;
-                self.dirty = true;
-            }
+            egui::Popup::menu(&arrow.on_hover_cursor(egui::CursorIcon::PointingHand)).show(|ui| {
+                ui.set_min_width(190.0);
+                let entries = [
+                    ("New Group", HAct::NewGroup),
+                    ("Import ~/.ssh/config", HAct::ImportConfig),
+                    ("Local terminal", HAct::LocalTerminal),
+                    ("Join shared session", HAct::JoinShared),
+                ];
+                for (text, a) in entries {
+                    if ui.button(text).clicked() {
+                        acts.push(a);
+                        ui.close();
+                    }
+                }
+            });
         });
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if icon_text_button(ui, crate::icons::Icon::Upload, "Import ~/.ssh/config").clicked() {
-                acts.push(HAct::ImportConfig);
-            }
-            if icon_text_button(ui, crate::icons::Icon::Terminal, "Local terminal").clicked() {
-                acts.push(HAct::LocalTerminal);
-            }
-            if icon_text_button(ui, crate::icons::Icon::Users, "Join shared session").clicked() {
-                acts.push(HAct::JoinShared);
-            }
-        });
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         self.join_window(ui.ctx());
 
         // breadcrumb: only inside a group, where it is the way back up (at the top it would be a label with no use)

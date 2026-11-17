@@ -5,6 +5,8 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+- Hosts: a new top bar with one search box (press Ctrl+K, or Cmd+K on a Mac, to jump to it), a grid/list switch and a
+  **New Host** button whose menu holds New Group, Import ~/.ssh/config, Local terminal and Join shared session.
 - Shared terminals: a guest's window now shows who is in the session (avatars on the tab and the card) and a badge under
   the cursor with the name of whoever is typing, the host included. Needs the sync server updated
   (`deploy/update.sh`); with an older server guests just see no badge.
