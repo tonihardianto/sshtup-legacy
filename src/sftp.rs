@@ -189,6 +189,8 @@ enum SAct {
     Delete,
     ChangeHost,
     LeftLocal,
+    /// Close the connection(s) and go back to the host list.
+    Disconnect,
 }
 
 struct SAuth {
@@ -904,6 +906,7 @@ fn menu_items(ui: &mut egui::Ui, side: Side, lhost: bool, acts: &mut Vec<(Side, 
     let mut items: Vec<(&str, SAct)> = vec![(t, SAct::Transfer), ("New folder", SAct::NewFolder), ("Rename", SAct::Rename), ("Delete selected", SAct::Delete), ("Refresh", SAct::Refresh)];
     if side == Side::Remote {
         items.push(("Change host", SAct::ChangeHost));
+        items.push(("Disconnect", SAct::Disconnect));
     } else {
         items.push((if lhost { "Change host…" } else { "Connect to a host…" }, SAct::ChangeHost));
         if lhost {
@@ -962,6 +965,19 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 }
                 ui.menu_button(RichText::new("Actions").size(13.0), |ui| menu_items(ui, side, lhost, acts));
                 ui.style_mut().visuals.widgets.inactive = saved;
+                if remote {
+                    let (dr, dresp) = ui.allocate_exact_size(Vec2::new(94.0, 28.0), Sense::click());
+                    if dresp.hovered() {
+                        ui.painter().rect_filled(dr, 6.0, CARD_HOVER);
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let col = if dresp.hovered() { RED } else { TEXT };
+                    paint(ui.painter(), Pos2::new(dr.left() + 14.0, dr.center().y), 14.0, Icon::Power, col);
+                    ui.painter().text(Pos2::new(dr.left() + 28.0, dr.center().y), Align2::LEFT_CENTER, "Disconnect", FontId::proportional(13.0), col);
+                    if dresp.clicked() {
+                        acts.push((side, SAct::Disconnect));
+                    }
+                }
                 let (fr, fresp) = ui.allocate_exact_size(Vec2::new(66.0, 28.0), Sense::click());
                 if fresp.hovered() {
                     ui.painter().rect_filled(fr, 6.0, CARD_HOVER);
@@ -1562,6 +1578,18 @@ impl App {
                     s.host = None;
                     s.cfg = None;
                 }
+            }
+            SAct::Disconnect => {
+                // the whole browser: the right host and a left host, if there is one
+                s.host = None;
+                s.cfg = None;
+                s.remote = Pane::default();
+                s.connect_started = None;
+                s.left_host = None;
+                s.lcfg = None;
+                s.local = Pane::default();
+                s.lconnect_started = None;
+                s.pick_left = false;
             }
             SAct::LeftLocal => {
                 s.left_host = None;
