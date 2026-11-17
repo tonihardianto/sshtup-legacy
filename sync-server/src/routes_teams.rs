@@ -14,11 +14,11 @@ const MAX_SEALED: usize = 4096;
 pub fn routes() -> Router<State> {
     Router::new()
         .route("/v1/teams", post(create).get(list))
-        .route("/v1/teams/:id/lookup", post(lookup))
-        .route("/v1/teams/:id/members", post(add_member))
-        .route("/v1/teams/:id/members/:uid", delete(remove_member))
-        .route("/v1/teams/:id/rotate", post(rotate))
-        .route("/v1/teams/:id/rotate/items", post(rotate_items))
+        .route("/v1/teams/{id}/lookup", post(lookup))
+        .route("/v1/teams/{id}/members", post(add_member))
+        .route("/v1/teams/{id}/members/{uid}", delete(remove_member))
+        .route("/v1/teams/{id}/rotate", post(rotate))
+        .route("/v1/teams/{id}/rotate/items", post(rotate_items))
 }
 
 fn internal() -> ApiErr {
