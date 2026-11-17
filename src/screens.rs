@@ -527,27 +527,29 @@ impl App {
         ui.add_space(6.0);
         self.join_window(ui.ctx());
 
-        // breadcrumb
-        ui.horizontal(|ui| {
-            if ui.add(egui::Label::new(RichText::new("All hosts").size(13.0).color(if self.cur_group.is_none() { TEXT } else { BLUE })).sense(Sense::click())).clicked() {
-                acts.push(HAct::OpenGroup(None));
-            }
-            let path: Vec<(u64, String)> = self.vault.group_path(self.cur_group).iter().map(|g| (g.id, g.name.clone())).collect();
-            for (id, name) in path {
-                label_muted(ui, "›");
-                if ui.add(egui::Label::new(RichText::new(name).size(13.0).color(BLUE)).sense(Sense::click())).clicked() {
-                    acts.push(HAct::OpenGroup(Some(id)));
+        // breadcrumb: only inside a group, where it is the way back up (at the top it would be a label with no use)
+        if self.cur_group.is_some() {
+            ui.horizontal(|ui| {
+                if ui.add(egui::Label::new(RichText::new("All hosts").size(13.0).color(BLUE)).sense(Sense::click())).clicked() {
+                    acts.push(HAct::OpenGroup(None));
                 }
-            }
-            if q.is_empty() && self.cur_group.is_some() {
-                if let Some(g) = self.cur_group {
-                    if ui.small_button("edit group").clicked() {
-                        acts.push(HAct::EditGroup(g));
+                let path: Vec<(u64, String)> = self.vault.group_path(self.cur_group).iter().map(|g| (g.id, g.name.clone())).collect();
+                for (id, name) in path {
+                    label_muted(ui, "›");
+                    if ui.add(egui::Label::new(RichText::new(name).size(13.0).color(BLUE)).sense(Sense::click())).clicked() {
+                        acts.push(HAct::OpenGroup(Some(id)));
                     }
                 }
-            }
-        });
-        ui.add_space(6.0);
+                if q.is_empty() && self.cur_group.is_some() {
+                    if let Some(g) = self.cur_group {
+                        if ui.small_button("edit group").clicked() {
+                            acts.push(HAct::EditGroup(g));
+                        }
+                    }
+                }
+            });
+            ui.add_space(6.0);
+        }
         ui.horizontal(|ui| {
             for (f, text) in [(HostFilter::All, "All"), (HostFilter::Connected, "Connected"), (HostFilter::HasTags, "Has tags")] {
                 if ui.add(egui::Button::new(RichText::new(text).size(12.5)).selected(self.host_filter == f).corner_radius(14)).clicked() {
