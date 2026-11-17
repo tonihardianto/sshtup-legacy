@@ -12,6 +12,15 @@ All notable changes to SSHTUP. Versions are the tags of the
   still appears when the connection drops, because it holds the Reconnect button.
 - `deploy/update.sh` updates the sync server from a release: checks the checksum, backs up the database, swaps the
   binary, restarts the service and goes back if it does not stay up.
+- The floating card is one flat list now (Snippets, the session code with a copy button, one switch per guest for typing,
+  Stop sharing, Disconnect) instead of menus inside menus. Folded, it is a round icon in the colour of the connection.
+- A guest cannot share the host's terminal onward: "Share this terminal" is gone from a guest's tab, and the app refuses
+  it too.
+- Hosts: new cards with an avatar (the last number of the IP address, or two letters, in the colour of the group),
+  `user@address:port`, and chips for Connected, team and tags. SFTP and a menu (Connect, Open SFTP, Edit, Duplicate,
+  Pin to top, Delete) show on hover or keyboard focus; right-click gives the same menu. A long user name is shortened
+  first, with the full text in a tooltip.
+- Hosts: a **Pinned** section at the top (a pinned host is listed once, there) and All / Connected / Has tags filters.
 
 ## 0.2.0
 
