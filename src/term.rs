@@ -53,7 +53,20 @@ pub struct Shared {
     pub exit_code: Mutex<Option<u32>>,
     /// When set, every chunk the program prints is also sent here (used to share a terminal).
     pub tap: Mutex<Option<std::sync::mpsc::Sender<Vec<u8>>>>,
+    /// Who of the guests of a shared terminal typed last, shown under the cursor for a moment.
+    pub typing: Mutex<Option<Typing>>,
 }
+
+/// A guest's keystroke seen by the host: shown as a small badge under the cursor.
+#[derive(Clone)]
+pub struct Typing {
+    pub name: String,
+    pub color: [u8; 3],
+    pub at: Instant,
+}
+
+/// How long the badge stays after the last keystroke.
+pub const TYPING_SHOWN: Duration = Duration::from_millis(2500);
 
 pub struct PtySession {
     pub spec: SessionSpec,
@@ -103,6 +116,7 @@ impl PtySession {
             last_output: Mutex::new(Instant::now()),
             exit_code: Mutex::new(None),
             tap: Mutex::new(None),
+            typing: Mutex::new(None),
             prompt: Mutex::new(None),
             answered_at: Mutex::new(None),
             login_seen: Mutex::new(None),
@@ -743,6 +757,26 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
                 ui.ctx().request_repaint_after(Duration::from_millis(280));
             } else {
                 painter.rect_stroke(r, 0.0, Stroke::new(1.0, cur), StrokeKind::Inside);
+            }
+        }
+    }
+    // a guest typing: their badge under the cursor, with a small arrow pointing at it
+    if let Some(t) = sess.shared.typing.lock().ok().and_then(|g| g.clone()) {
+        let age = t.at.elapsed();
+        if age < TYPING_SHOWN && !screen.hide_cursor() && screen.scrollback() == 0 {
+            let (cr, cc) = screen.cursor_position();
+            if cr < rows && cc < cols {
+                let p = origin_of(cr, cc);
+                let c = Color32::from_rgb(t.color[0], t.color[1], t.color[2]);
+                let tip = Pos2::new(p.x + cs.x * 0.5, p.y + cs.y + 2.0);
+                let size = 22.0;
+                let mut b = Rect::from_min_size(Pos2::new(tip.x - size / 2.0, tip.y + 6.0), Vec2::splat(size));
+                if b.right() > rect.right() {
+                    b = b.translate(Vec2::new(rect.right() - b.right(), 0.0));
+                }
+                painter.add(egui::Shape::convex_polygon(vec![tip, Pos2::new(tip.x - 5.0, tip.y + 7.0), Pos2::new(tip.x + 5.0, tip.y + 7.0)], c, Stroke::NONE));
+                crate::ui::avatar(&painter, b.center(), size / 2.0, &t.name, c);
+                ui.ctx().request_repaint_after(TYPING_SHOWN.saturating_sub(age) + Duration::from_millis(20));
             }
         }
     }

@@ -633,9 +633,8 @@ impl App {
                         .map(|t| (t.id, t.title.clone(), if t.sess.shared.alive.load(std::sync::atomic::Ordering::Relaxed) { GREEN } else { RED }))
                         .collect();
                     for (id, title, dot) in ids {
-                        let shared = self.collab.shares.iter().any(|s| s.tab_id == id);
-                        let label = if shared { format!("{title}  (shared)") } else { title.clone() };
-                        let (c, x, resp) = tab_button(ui, &label, self.active == Some(id), true, Some(dot), None);
+                        let people = self.collab.people(id);
+                        let (c, x, resp) = tab_button_with(ui, &title, self.active == Some(id), true, Some(dot), None, &people);
                         let act = std::cell::Cell::new(crate::collab::CollabAct::None);
                         let sh = self.collab.shares.iter().find(|s| s.tab_id == id).cloned();
                         resp.context_menu(|ui| act.set(crate::collab::collab_items(ui, sh.as_ref())));

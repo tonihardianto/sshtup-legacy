@@ -170,6 +170,11 @@ pub fn status_dot(painter: &egui::Painter, center: Pos2, color: Color32) {
 
 /// Returns (tab clicked, close clicked, the tab's response for context menus).
 pub fn tab_button(ui: &mut egui::Ui, label: &str, active: bool, closable: bool, dot: Option<Color32>, glyph: Option<&str>) -> (bool, bool, egui::Response) {
+    tab_button_with(ui, label, active, closable, dot, glyph, &[])
+}
+
+/// A tab that also shows a stack of avatars (the people in a shared terminal).
+pub fn tab_button_with(ui: &mut egui::Ui, label: &str, active: bool, closable: bool, dot: Option<Color32>, glyph: Option<&str>, people: &[(String, Color32)]) -> (bool, bool, egui::Response) {
     let font = FontId::proportional(13.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), TEXT);
     let mut w = galley.size().x + 28.0;
@@ -179,7 +184,8 @@ pub fn tab_button(ui: &mut egui::Ui, label: &str, active: bool, closable: bool, 
     if dot.is_some() || glyph.is_some() {
         w += 18.0;
     }
-    let w = w.clamp(80.0, 220.0);
+    let stack = if people.is_empty() { 0.0 } else { 18.0 + 14.0 * (people.len() - 1) as f32 + 6.0 };
+    let w = (w + stack).clamp(80.0, 260.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, 32.0), Sense::click());
     let hovered = resp.hovered();
     let bg = if active { BG_CONTENT } else if hovered { CARD } else { Color32::TRANSPARENT };
@@ -198,7 +204,12 @@ pub fn tab_button(ui: &mut egui::Ui, label: &str, active: bool, closable: bool, 
         }
         x += 18.0;
     }
-    let max_w = rect.right() - x - if closable { 26.0 } else { 10.0 };
+    let max_w = rect.right() - x - stack - if closable { 26.0 } else { 10.0 };
+    // the people, overlapping, just before the close button
+    let right = rect.right() - if closable { 28.0 } else { 10.0 };
+    for (i, (name, col)) in people.iter().enumerate().rev() {
+        avatar(ui.painter(), Pos2::new(right - 9.0 - 14.0 * (people.len() - 1 - i) as f32, rect.center().y), 9.0, name, *col);
+    }
     let clip = Rect::from_min_max(Pos2::new(x, rect.top()), Pos2::new(x + max_w, rect.bottom()));
     ui.painter().with_clip_rect(clip).text(Pos2::new(x, rect.center().y), Align2::LEFT_CENTER, label, font, if active { TEXT } else { MUTED });
     let mut close_clicked = false;
@@ -397,4 +408,12 @@ pub fn password_modal(ctx: &egui::Context, area: Rect, who: &str, passphrase: bo
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
     ans
+}
+
+/// A round badge with the first letter of a name, in the person's colour (rings use the same colour).
+pub fn avatar(painter: &egui::Painter, center: Pos2, radius: f32, name: &str, color: Color32) {
+    painter.circle_filled(center, radius, color);
+    painter.circle_stroke(center, radius, Stroke::new(1.5, Color32::from_black_alpha(90)));
+    let letter: String = name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
+    painter.text(center, Align2::CENTER_CENTER, letter, FontId::proportional(radius * 1.15), Color32::from_rgb(20, 22, 30));
 }
