@@ -53,7 +53,7 @@ async fn relay_ticket(axum::extract::State(st): axum::extract::State<State>, h: 
 /// Makes a one-time registration code and returns it (only its hash is stored).
 pub fn create_invite(db: &Db) -> String {
     let mut b = [0u8; 10];
-    getrandom::getrandom(&mut b).expect("system random");
+    getrandom::fill(&mut b).expect("system random");
     let code = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, &b);
     db.with(|c| c.execute("INSERT INTO server_invites(code_hash) VALUES(?1)", [auth::sha(code.as_bytes())])).expect("insert invite");
     code

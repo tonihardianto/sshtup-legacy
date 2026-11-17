@@ -45,7 +45,7 @@ mod tests {
     fn merge_is_commutative() {
         let mut r = [0u8; 8];
         for _ in 0..1000 {
-            getrandom::getrandom(&mut r).unwrap();
+            getrandom::fill(&mut r).unwrap();
             let a = s((r[0] % 4) as u64, r[1] % 2 == 0, if r[2] % 2 == 0 { "a" } else { "b" });
             let b = s((r[3] % 4) as u64, r[4] % 2 == 0, if r[5] % 2 == 0 { "a" } else { "b" });
             let w1 = if newer(&a, &b) { &a } else { &b };

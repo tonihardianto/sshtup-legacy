@@ -68,7 +68,7 @@ pub fn own_fingerprint(x_public: &[u8; 32]) -> String {
 /// Makes a team. Returns its id; the key is read back with `my_teams`.
 pub fn create_team(api: &Api, x_public: &[u8; 32], name: &str) -> Result<i64, SyncError> {
     let mut key = Zeroizing::new([0u8; 32]);
-    getrandom::getrandom(&mut *key).map_err(|_| bad("no randomness"))?;
+    getrandom::fill(&mut *key).map_err(|_| bad("no randomness"))?;
     api.create_team(&TeamCreateReq { name: name.trim().to_string(), sealed_team_key: b64().encode(seal_to(x_public, &*key)) })
 }
 
@@ -163,7 +163,7 @@ pub fn resume_rotation(api: &Api, team_id: i64, x_secret: &[u8; 32], old_key: Op
     }
     let mut new_key = Zeroizing::new([0u8; 32]);
     if t.key_epoch < t.epoch {
-        getrandom::getrandom(&mut *new_key).map_err(|_| bad("no randomness"))?;
+        getrandom::fill(&mut *new_key).map_err(|_| bad("no randomness"))?;
         let members = t.members.iter().map(|m| RotateMember { user_id: m.user_id, sealed_team_key: b64().encode(seal_to(&m.pubkey, &*new_key)) }).collect();
         api.rotate(team_id, &RotateReq { epoch: t.epoch, members })?;
     }

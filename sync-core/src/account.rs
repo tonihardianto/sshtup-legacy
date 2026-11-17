@@ -31,7 +31,7 @@ pub fn derive_account(password: &str, salt: &[u8; 16]) -> Result<AccountKeys, Se
 /// Blob: nonce(24) | ciphertext+tag, with `purpose` as AAD.
 pub fn wrap_key(wrapping: &[u8; 32], purpose: &str, key: &[u8; 32]) -> Vec<u8> {
     let mut nonce = [0u8; 24];
-    getrandom::getrandom(&mut nonce).expect("system random");
+    getrandom::fill(&mut nonce).expect("system random");
     let ct = XChaCha20Poly1305::new(wrapping.into())
         .encrypt(XNonce::from_slice(&nonce), Payload { msg: key, aad: purpose.as_bytes() })
         .expect("encrypt");
