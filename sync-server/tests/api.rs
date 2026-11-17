@@ -6,18 +6,44 @@ fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 
-pub fn call(method: &str, url: &str, token: Option<&str>, body: Value) -> (u16, Value) {
-    let mut req = ureq::request(method, url);
-    if let Some(t) = token {
-        req = req.set("Authorization", &format!("Bearer {t}"));
+/// A client that returns 4xx/5xx answers as ordinary replies, so tests can read their status and body.
+fn http() -> ureq::Agent {
+    ureq::Agent::new_with_config(ureq::Agent::config_builder().http_status_as_error(false).build())
+}
+
+/// Sends `body` with the given headers; `(status, body)`, or status 0 if the server hung up.
+fn send_raw(method: &str, url: &str, headers: &[(&str, String)], body: Option<Vec<u8>>) -> (u16, Vec<u8>) {
+    let mut b = ureq::http::Request::builder().method(method).uri(url);
+    for (k, v) in headers {
+        b = b.header(*k, v);
     }
-    let r = if method == "GET" || method == "DELETE" { req.call() } else { req.send_json(body) };
-    match r {
-        Ok(resp) => (resp.status(), resp.into_json().unwrap_or(Value::Null)),
-        Err(ureq::Error::Status(c, resp)) => (c, resp.into_json().unwrap_or(Value::Null)),
+    let res = match body {
+        Some(bytes) => http().run(b.body(bytes).unwrap()),
+        None => http().run(b.body(()).unwrap()),
+    };
+    match res {
+        Ok(resp) => {
+            let code = resp.status().as_u16();
+            (code, resp.into_body().read_to_vec().unwrap_or_default())
+        }
         // the server may hang up while an oversized body is still being sent
-        Err(ureq::Error::Transport(_)) => (0, Value::Null),
+        Err(_) => (0, Vec::new()),
     }
+}
+
+pub fn call(method: &str, url: &str, token: Option<&str>, body: Value) -> (u16, Value) {
+    let mut headers = Vec::new();
+    if let Some(t) = token {
+        headers.push(("Authorization", format!("Bearer {t}")));
+    }
+    let payload = if method == "GET" || method == "DELETE" {
+        None
+    } else {
+        headers.push(("Content-Type", "application/json".to_string()));
+        Some(serde_json::to_vec(&body).unwrap())
+    };
+    let (code, bytes) = send_raw(method, url, &headers, payload);
+    (code, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
 }
 
 pub fn reg_body(email: &str, code: &str, auth: u8) -> Value {
@@ -528,12 +554,8 @@ fn garbage_json_bodies_return_4xx_not_a_crash() {
     for seed in 0..200u64 {
         let route = routes[(seed as usize) % routes.len()];
         let body = if seed % 3 == 0 { shapes[(seed as usize / 3) % shapes.len()].clone() } else { noise(seed, (seed as usize * 7) % 300) };
-        let r = ureq::post(&format!("{base}{route}")).set("Content-Type", "application/json").set("Authorization", &format!("Bearer {tok}")).send_bytes(&body);
-        let code = match r {
-            Ok(r) => r.status(),
-            Err(ureq::Error::Status(c, _)) => c,
-            Err(e) => panic!("transport error on {route}: {e}"),
-        };
+        let (code, _) = send_raw("POST", &format!("{base}{route}"), &[("Content-Type", "application/json".into()), ("Authorization", format!("Bearer {tok}"))], Some(body.clone()));
+        assert_ne!(code, 0, "transport error on {route}");
         assert!((400..500).contains(&code), "{route} gave {code} for {:?}", String::from_utf8_lossy(&body));
         n += 1;
     }
@@ -653,12 +675,8 @@ fn relay_ticket_needs_an_account_and_an_enabled_relay() {
 }
 
 fn login_from(base: &str, email: &str, auth: u8, ip: &str) -> u16 {
-    let r = ureq::post(&format!("{base}/v1/login")).set("X-Forwarded-For", ip).send_json(json!({"email": email, "auth_key": b64(&[auth; 32]), "device_name": "laptop"}));
-    match r {
-        Ok(x) => x.status(),
-        Err(ureq::Error::Status(c, _)) => c,
-        Err(_) => 0,
-    }
+    let body = serde_json::to_vec(&json!({"email": email, "auth_key": b64(&[auth; 32]), "device_name": "laptop"})).unwrap();
+    send_raw("POST", &format!("{base}/v1/login"), &[("X-Forwarded-For", ip.to_string()), ("Content-Type", "application/json".into())], Some(body)).0
 }
 
 #[test]
