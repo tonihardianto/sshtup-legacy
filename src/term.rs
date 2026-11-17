@@ -424,7 +424,7 @@ pub fn rgb(c: u32) -> Color32 {
     Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
 
-fn blend(a: Color32, b: Color32, t: f32) -> Color32 {
+pub fn blend(a: Color32, b: Color32, t: f32) -> Color32 {
     let m = |x: u8, y: u8| (x as f32 * (1.0 - t) + y as f32 * t) as u8;
     Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
 }
@@ -447,6 +447,11 @@ pub fn indexed_color(scheme: &Scheme, n: u8) -> Color32 {
 pub struct TermOptions<'a> {
     pub scheme: &'a Scheme,
     pub font_size: f32,
+    /// Row height as a multiple of the font's line height (1.0 = as tight as the font allows).
+    pub line_height: f32,
+    /// "block", "bar" or "underline".
+    pub cursor_shape: &'a str,
+    pub cursor_blink: bool,
     pub brighten_bold: bool,
     pub option_is_meta: bool,
     pub right_click_paste: bool,
@@ -461,17 +466,30 @@ pub struct TermViewState {
     pub ac: crate::autocomplete::AcState,
 }
 
-fn cell_size(ui: &egui::Ui, font: &FontId) -> Vec2 {
+/// The size of one terminal cell, and how far down in it the glyphs start (rows taller than the font centre their text).
+pub fn cell_size(ui: &egui::Ui, font: &FontId, line_height: f32) -> (Vec2, f32) {
     ui.fonts_mut(|f| {
         let g = f.layout_no_wrap("M".into(), font.clone(), Color32::WHITE);
-        Vec2::new(g.size().x, f.row_height(font).ceil() + 1.0)
+        let tight = f.row_height(font).ceil() + 1.0;
+        let h = (f.row_height(font) * line_height.clamp(1.0, 2.0)).ceil() + 1.0;
+        (Vec2::new(g.size().x, h), ((h - tight) / 2.0).floor())
     })
+}
+
+/// The cursor drawn in `r` (one cell). A block shows the character under it in `bg`.
+pub fn paint_cursor(painter: &egui::Painter, r: Rect, shape: &str, color: Color32) {
+    let r = match shape {
+        "bar" => Rect::from_min_size(r.min, Vec2::new(2.0, r.height())),
+        "underline" => Rect::from_min_max(Pos2::new(r.left(), r.bottom() - 2.0), r.max),
+        _ => r,
+    };
+    painter.rect_filled(r, 0.0, color);
 }
 
 /// Draws the terminal and forwards keyboard / mouse input. Returns true when the pointer clicked in it.
 pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &mut TermViewState, o: &TermOptions, want_focus: bool) -> bool {
-    let font = FontId::monospace(o.font_size);
-    let cs = cell_size(ui, &font);
+    let font = crate::fonts::term(o.font_size);
+    let (cs, ty) = cell_size(ui, &font, o.line_height);
     let avail = ui.available_size();
     let (rect, resp) = ui.allocate_exact_size(avail, Sense::click_and_drag());
     let pad = 10.0;
@@ -756,7 +774,7 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
             if ru.text.trim().is_empty() && !ru.underline {
                 continue;
             }
-            let p = origin_of(r, ru.col);
+            let p = origin_of(r, ru.col) + Vec2::new(0.0, ty);
             let mut text = egui::RichText::new(&ru.text).font(font.clone()).color(ru.fg);
             if ru.bold {
                 text = text.strong();
@@ -771,7 +789,7 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
                 painter.galley(p + Vec2::new(0.6, 0.0), galley, ru.fg);
             }
             if ru.underline {
-                let y = p.y + cs.y - 2.0;
+                let y = p.y + cs.y - 2.0 - 2.0 * ty;
                 painter.line_segment([Pos2::new(p.x, y), Pos2::new(p.x + ru.text.chars().count() as f32 * cs.x, y)], Stroke::new(1.0, ru.fg));
             }
             let _ = text;
@@ -796,16 +814,20 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
             let r = Rect::from_min_size(p, Vec2::new(cs.x, cs.y));
             let cur = rgb(o.scheme.cursor);
             if focused {
-                let blink = (ui.input(|i| i.time) * 1.8) as i64 % 2 == 0;
-                if blink {
-                    painter.rect_filled(r, 0.0, cur);
-                    if let Some(cell) = screen.cell(cr, cc) {
-                        if cell.has_contents() {
-                            painter.text(p, egui::Align2::LEFT_TOP, cell.contents(), font.clone(), bg);
+                let on = !o.cursor_blink || (ui.input(|i| i.time) * 1.8) as i64 % 2 == 0;
+                if on {
+                    paint_cursor(&painter, r, o.cursor_shape, cur);
+                    if o.cursor_shape == "block" {
+                        if let Some(cell) = screen.cell(cr, cc) {
+                            if cell.has_contents() {
+                                painter.text(p + Vec2::new(0.0, ty), egui::Align2::LEFT_TOP, cell.contents(), font.clone(), bg);
+                            }
                         }
                     }
                 }
-                ui.ctx().request_repaint_after(Duration::from_millis(280));
+                if o.cursor_blink {
+                    ui.ctx().request_repaint_after(Duration::from_millis(280));
+                }
             } else {
                 painter.rect_stroke(r, 0.0, Stroke::new(1.0, cur), StrokeKind::Inside);
             }

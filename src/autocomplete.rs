@@ -473,6 +473,11 @@ impl History {
         self.dirty = true;
     }
 
+    /// How many commands are remembered, over all hosts.
+    pub fn count(&self) -> usize {
+        self.map.values().map(|v| v.len()).sum()
+    }
+
     pub fn clear(&mut self) {
         self.done.clear();
         self.map.clear();

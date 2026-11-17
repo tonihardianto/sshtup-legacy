@@ -1,9 +1,8 @@
 //! The pages of the main window and the edit panel that slides in on the right.
 
-use crate::app::{expand_home, find_scheme, App, Del, Editor, Screen};
+use crate::app::{expand_home, App, Del, Editor, Screen};
 use crate::model::*;
 use crate::schemes::SCHEMES;
-use crate::term::rgb;
 use crate::ui::*;
 use eframe::egui::{self, Align2, Color32, FontId, Frame, Margin, Pos2, Rect, RichText, Sense, Vec2};
 
@@ -1271,143 +1270,6 @@ impl App {
         }
         if let Some(p) = del {
             self.confirm = Some(Del::Log(p));
-        }
-    }
-
-    // ----------------------------------------------------------- settings --
-
-    pub fn screen_settings(&mut self, ui: &mut egui::Ui) {
-        let mut ch = false;
-        let mut clear_history = false;
-        page_header(ui, "Settings", |_| {});
-        let data_path = data_dir().to_string_lossy().to_string();
-        ui.horizontal(|ui| {
-            for (i, name) in ["Terminal", "General", "Security", "Sync"].iter().enumerate() {
-                let on = self.settings_tab == i as u8;
-                if ui.selectable_label(on, RichText::new(*name).size(13.0).color(if on { TEXT } else { MUTED })).clicked() {
-                    self.settings_tab = i as u8;
-                }
-                ui.add_space(6.0);
-            }
-        });
-        ui.add_space(4.0);
-        let tab = self.settings_tab;
-        egui::ScrollArea::vertical().auto_shrink(false).id_salt(("settings_scroll", tab)).show(ui, |ui| {
-            let s = &mut self.vault.settings;
-            ui.set_max_width(720.0);
-            if tab == 0 {
-            section_title(ui, "TERMINAL");
-            setting_row(ui, "Color scheme", "Used by every terminal unless a host picks its own", |ui| {
-                egui::ComboBox::from_id_salt("scheme").width(200.0).selected_text(s.color_scheme.clone()).show_ui(ui, |ui| {
-                    for sc in SCHEMES {
-                        if ui.selectable_value(&mut s.color_scheme, sc.name.to_string(), sc.name).changed() {
-                            ch = true;
-                        }
-                    }
-                });
-            });
-            // preview
-            let sch = find_scheme(&s.color_scheme);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width().min(520.0), 96.0), Sense::hover());
-            ui.painter().rect_filled(rect, 8.0, rgb(sch.background));
-            ui.painter().rect_stroke(rect, 8.0, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
-            let mono = FontId::monospace(s.font_size.clamp(8.0, 18.0));
-            ui.painter().text(rect.min + Vec2::new(12.0, 10.0), Align2::LEFT_TOP, "user@host:~$ ls -la", mono.clone(), rgb(sch.foreground));
-            ui.painter().text(rect.min + Vec2::new(12.0, 10.0 + mono.size + 4.0), Align2::LEFT_TOP, "drwxr-xr-x  projects  notes.txt", mono.clone(), rgb(sch.palette[4]));
-            for i in 0..16 {
-                let r = Rect::from_min_size(rect.min + Vec2::new(12.0 + i as f32 * 20.0, rect.height() - 26.0), Vec2::new(18.0, 14.0));
-                ui.painter().rect_filled(r, 3.0, rgb(sch.palette[i]));
-            }
-            ui.add_space(8.0);
-            setting_row(ui, "Font size", "", |ui| {
-                ch |= ui.add(egui::DragValue::new(&mut s.font_size).range(MIN_FONT_SIZE..=MAX_FONT_SIZE).speed(0.2)).changed();
-            });
-            setting_row(ui, "Scrollback", "Lines kept for scrolling back", |ui| {
-                ch |= ui.add(egui::DragValue::new(&mut s.scrollback).range(0..=1_000_000).speed(100.0)).changed();
-            });
-            setting_row(ui, "Terminal type", "Value of TERM sent to the server", |ui| {
-                ch |= ui.add(egui::TextEdit::singleline(&mut s.terminal_type).desired_width(160.0)).changed();
-            });
-            setting_row(ui, "Autocomplete", "Suggest commands under the cursor from this host's history, snippets and common commands", |ui| {
-                ch |= toggle(ui, &mut s.autocomplete).changed();
-            });
- setting_row(ui, "Read host history", "On the first connection to a host, also read its own shell history (bash, zsh, fish) with one extra command; commands that look like they hold secrets are skipped", |ui| {
-                ch |= toggle(ui, &mut s.remote_history).changed();
-            });
-            setting_row(ui, "Command history", "Commands remembered for autocomplete, stored only on this computer", |ui| {
-                if flat_button(ui, "Clear history").clicked() {
-                    clear_history = true;
-                }
-            });
-            setting_row(ui, "Brighten bold text", "Draw bold text in the bright colors", |ui| {
-                ch |= toggle(ui, &mut s.brighten_bold_text).changed();
-            });
-            setting_row(ui, "Use Option as Meta key", "Alt/Option sends Esc before the key", |ui| {
-                ch |= toggle(ui, &mut s.option_is_meta).changed();
-            });
-            setting_row(ui, "Right click to paste", "Otherwise right click opens a menu", |ui| {
-                ch |= toggle(ui, &mut s.right_click_to_paste).changed();
-            });
-            setting_row(ui, "Bell sound", "Show a bell mark when a program rings the bell", |ui| {
-                ch |= toggle(ui, &mut s.bell_sound).changed();
-            });
-            setting_row(ui, "Session card", "Where the small card with Snippets, Share and Disconnect sits on a terminal. Hidden removes it (it still appears when the connection drops)", |ui| {
-                let label = crate::card::POSITIONS.iter().find(|(k, _)| *k == s.card_position).map(|(_, l)| *l).unwrap_or("Top right");
-                egui::ComboBox::from_id_salt("card-position").width(140.0).selected_text(label).show_ui(ui, |ui| {
-                    for (k, l) in crate::card::POSITIONS {
-                        if ui.selectable_value(&mut s.card_position, k.to_string(), l).changed() {
-                            ch = true;
-                        }
-                    }
-                });
-            });
-            }
-            if tab == 1 {
-            section_title(ui, "CONNECTION");
-            setting_row(ui, "Keep-alive interval", "Seconds between keep-alive packets (0 = off)", |ui| {
-                ch |= ui.add(egui::DragValue::new(&mut s.keep_alive).range(0..=3600)).changed();
-            });
-            setting_row(ui, "Auto-reconnect", "Reconnect when a long-running SSH link drops", |ui| {
-                ch |= toggle(ui, &mut s.autoreconnect).changed();
-            });
-            section_title(ui, "SFTP");
-            setting_row(ui, "Default editor", "Used by Open in the SFTP file browser", |ui| {
-                egui::ComboBox::from_id_salt("editor").width(180.0).selected_text(editor_label(&s.default_editor)).show_ui(ui, |ui| {
-                    for (k, label) in EDITORS {
-                        if ui.selectable_value(&mut s.default_editor, k.to_string(), label).changed() {
-                            ch = true;
-                        }
-                    }
-                });
-            });
-            section_title(ui, "HOSTS");
-            setting_row(ui, "Sort hosts by", "", |ui| {
-                egui::ComboBox::from_id_salt("sort").width(120.0).selected_text(s.sort_by.clone()).show_ui(ui, |ui| {
-                    for n in ["Date", "Name"] {
-                        if ui.selectable_value(&mut s.sort_by, n.to_string(), n).changed() {
-                            ch = true;
-                        }
-                    }
-                });
-            });
-            section_title(ui, "DATA");
-            ui.label(RichText::new(format!("Everything is stored on this computer in {}", data_path)).size(12.0).color(MUTED));
-            }
-            if tab == 2 {
-                self.settings_security(ui);
-            }
-            if tab == 3 {
-                self.settings_sync(ui);
-            }
-        });
-        if clear_history {
-            self.history.clear();
-            self.hist_tried.clear();
-            self.history.save();
-            self.toast = Some(("Command history cleared".into(), std::time::Instant::now(), crate::ui::GREEN));
-        }
-        if ch {
-            self.dirty = true;
         }
     }
 }
