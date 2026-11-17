@@ -188,6 +188,8 @@ pub struct Settings {
     pub font_size: f32,
     pub scrollback: usize,
     pub bell_sound: bool,
+    /// Where the floating card sits on a terminal: top-right, top-left, bottom-right, bottom-left or hidden.
+    pub card_position: String,
     pub option_is_meta: bool,
     pub right_click_to_paste: bool,
     pub brighten_bold_text: bool,
@@ -209,6 +211,7 @@ impl Default for Settings {
             font_size: DEFAULT_FONT_SIZE,
             scrollback: DEFAULT_SCROLLBACK,
             bell_sound: false,
+            card_position: "top-right".into(),
             option_is_meta: false,
             right_click_to_paste: false,
             brighten_bold_text: false,

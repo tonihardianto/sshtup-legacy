@@ -11,7 +11,11 @@ sync server you host yourself.
 - Optional master password: the vault, logs and history are encrypted (Argon2id + XChaCha20-Poly1305)
 - **Sync** between your devices through your own server, end-to-end encrypted: the server only stores sealed data
 - **Teams**: share a host or a whole group with other people on the same server
-- **Shared terminals**: let someone watch (and, if you allow it, type into) a terminal, end-to-end encrypted
+- **Shared terminals**: let someone watch (and, if you allow it, type into) a terminal, end-to-end encrypted. Everyone sees who is in the session and who is typing
+
+![The host list](docs/screenshots/hosts.png)
+
+![The SFTP browser](docs/screenshots/sftp.png)
 
 ## Install
 

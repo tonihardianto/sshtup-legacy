@@ -251,7 +251,10 @@ impl App {
             lock = None;
         }
         if demo {
+            // sample hosts, but the settings on disk (so a screenshot can show a chosen setting)
+            let settings = vault.settings.clone();
             vault = demo_vault();
+            vault.settings = settings;
         }
         let mut app = App {
             ctx: cc.egui_ctx.clone(),
@@ -829,8 +832,10 @@ impl App {
                 }
             }
             // the floating card: connection, snippets, sharing (not while a cover is up)
-            if !covered {
-                let c = crate::card::CardIn { tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people };
+            // (a hidden card still comes back when the connection is lost: it holds the Reconnect button)
+            let corner = crate::card::Corner::from_setting(&s.card_position);
+            if !covered && (corner.is_some() || !alive) {
+                let c = crate::card::CardIn { corner: corner.unwrap_or(crate::card::Corner::TopRight), tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people };
                 let a = crate::card::session_card(ui.ctx(), area, &mut tab.card_pinned, &c);
                 if a.disconnect {
                     tab.sess.kill();
