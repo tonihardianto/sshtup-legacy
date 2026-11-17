@@ -16,10 +16,10 @@ All notable changes to SSHTUP. Versions are the tags of the
   Stop sharing, Disconnect) instead of menus inside menus. Folded, it is a round icon in the colour of the connection.
 - A guest cannot share the host's terminal onward: "Share this terminal" is gone from a guest's tab, and the app refuses
   it too.
-- Hosts: new cards with an avatar (the last number of the IP address, or two letters, in the colour of the group),
-  `user@address:port`, and chips for Connected, team and tags. SFTP and a menu (Connect, Open SFTP, Edit, Duplicate,
-  Pin to top, Delete) show on hover or keyboard focus; right-click gives the same menu. A long user name is shortened
-  first, with the full text in a tooltip.
+- Hosts: new cards with an avatar (the last number of the IP address, or two letters, in the colour of the group, with
+  a green dot while connected), `user@address:port`, and chips for team and tags. SFTP and a menu (Connect, Open SFTP,
+  Edit, Duplicate, Pin to top, Delete) show on hover or keyboard focus; right-click gives the same menu. A long user
+  name is shortened first, with the full text in a tooltip.
 - Hosts: a **Pinned** section at the top (a pinned host is listed once, there) and All / Connected / Has tags filters.
 
 ## 0.2.0

@@ -1,4 +1,4 @@
-//! The host card on the Hosts screen: an avatar, the name, `user@address:port`, chips for the state and tags, and
+//! The host card on the Hosts screen: an avatar (with a green dot while connected), the name, `user@address:port`, chips for team and tags, and
 //! actions that show while the pointer or the keyboard focus is on the card.
 
 use crate::icons::{self, Icon};
@@ -64,9 +64,6 @@ pub struct HostCardIn<'a> {
 impl HostCardIn<'_> {
     fn chips(&self) -> Vec<(String, bool)> {
         let mut v: Vec<(String, bool)> = vec![];
-        if self.live {
-            v.push(("Connected".into(), true));
-        }
         if !self.team.is_empty() {
             v.push((self.team.clone(), false));
         }
