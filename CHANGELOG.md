@@ -21,8 +21,8 @@ All notable changes to SSHTUP. Versions are the tags of the
   Pin to top, Delete) show on hover or keyboard focus; right-click gives the same menu. A long user name is shortened
   first, with the full text in a tooltip.
 - Hosts: a **Pinned** section at the top (a pinned host is listed once, there) and All / Connected / Has tags filters.
-- SFTP: a **Disconnect** button in the header of the host pane (and in its Actions menu) closes the connection and
-  goes back to the host list, instead of only being able to change host.
+- SFTP: **Actions > Disconnect** on the host pane closes the connection and goes back to the host list, instead of only
+  being able to change host.
 
 ## 0.2.0
 
