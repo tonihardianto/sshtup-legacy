@@ -1,5 +1,6 @@
 mod app;
 mod autocomplete;
+mod card;
 mod collab;
 mod collab_net;
 mod icons;

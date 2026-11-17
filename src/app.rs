@@ -97,6 +97,8 @@ pub struct TermTab {
     pub view: TermViewState,
     pub reconnect_at: Option<Instant>,
     pub focus_next: bool,
+    /// The session card was opened by a click and stays open until clicked again.
+    pub card_pinned: bool,
     /// The connection to the host is up (or has given up waiting); the "connecting" cover is gone.
     pub ready: bool,
     /// What is typed in the password window, and whether to keep it on the host.
@@ -477,7 +479,7 @@ impl App {
             Ok(sess) => {
                 let id = self.next_tab;
                 self.next_tab += 1;
-                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, ready: false, pw_text: String::new(), pw_remember: false });
+                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false });
                 self.active = Some(id);
             }
             Err(e) => self.notify(format!("Could not start: {}", e), RED),
@@ -743,43 +745,11 @@ impl App {
             (vec![], vec![])
         };
         let bell = self.tabs[idx].sess.shared.bell.load(std::sync::atomic::Ordering::Relaxed);
+        let share = self.collab.shares.iter().find(|s| s.tab_id == tab_id).cloned();
+        let people = self.collab.people(tab_id);
+        let mut card_collab: Option<crate::collab::CollabAct> = None;
 
         Frame::new().fill(rgb_c(scheme.background)).show(ui, |ui| {
-            // thin toolbar
-            Frame::new().fill(BG_WINDOW).inner_margin(Margin::symmetric(12, 6)).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let (dot, status) = if alive { (GREEN, "Connected") } else { (RED, "Disconnected") };
-                    let (r, _) = ui.allocate_exact_size(Vec2::splat(10.0), egui::Sense::hover());
-                    status_dot(ui.painter(), r.center(), dot);
-                    ui.label(RichText::new(&self.tabs[idx].title).strong().size(13.0));
-                    ui.label(RichText::new(status).size(12.0).color(MUTED));
-                    if s.bell_sound && bell > 0 {
-                        let (br, _) = ui.allocate_exact_size(Vec2::splat(14.0), egui::Sense::hover());
-                        crate::icons::paint(ui.painter(), br.center(), 13.0, crate::icons::Icon::Bell, AMBER);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if alive {
-                            if flat_button(ui, "Disconnect").clicked() {
-                                self.tabs[idx].sess.kill();
-                            }
-                        } else if primary_button(ui, "Reconnect").clicked() {
-                            reconnect = true;
-                        }
-                        self.collab_menu(ui, tab_id);
-                        ui.menu_button("Snippets", |ui| {
-                            if snippets.is_empty() {
-                                label_muted(ui, "No snippets yet");
-                            }
-                            for sn in &snippets {
-                                if ui.button(sn.display_label()).clicked() {
-                                    run_snippet = Some(sn.script.clone());
-                                    ui.close();
-                                }
-                            }
-                        });
-                    });
-                });
-            });
             let opts = TermOptions { scheme, font_size: fsize, brighten_bold: s.brighten_bold_text, option_is_meta: s.option_is_meta, right_click_paste: s.right_click_to_paste, ac: if s.autocomplete { Some(crate::autocomplete::AcSource { history: &ac_hist, snippets: &ac_snips }) } else { None } };
             let focus = std::mem::take(&mut self.tabs[idx].focus_next);
             let tab = &mut self.tabs[idx];
@@ -847,8 +817,24 @@ impl App {
                     tab.ready = true;
                 }
             }
+            // the floating card: connection, snippets, sharing (not while a cover is up)
+            if !covered {
+                let c = crate::card::CardIn { tab_id, alive, bell: s.bell_sound && bell > 0, snippets: &snippets, share: share.as_ref(), people: &people };
+                let a = crate::card::session_card(ui.ctx(), area, &mut tab.card_pinned, &c);
+                if a.disconnect {
+                    tab.sess.kill();
+                }
+                reconnect |= a.reconnect;
+                if a.run_snippet.is_some() {
+                    run_snippet = a.run_snippet;
+                }
+                card_collab = a.collab;
+            }
         });
 
+        if let Some(a) = card_collab {
+            self.collab_apply(ui, tab_id, a);
+        }
         // first connection to a host: read the host's own shell history for autocomplete
         if s.autocomplete && s.remote_history && !self.demo {
             let t = &self.tabs[idx];

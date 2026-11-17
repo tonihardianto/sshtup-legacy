@@ -148,17 +148,6 @@ fn make_code(seed: u64) -> String {
 }
 
 impl App {
-    /// The small "Collaboration" menu in a terminal's toolbar.
-    pub fn collab_menu(&mut self, ui: &mut egui::Ui, tab_id: u64) {
-        let shared = self.collab.shares.iter().find(|s| s.tab_id == tab_id).cloned();
-        let label = if shared.is_some() { "Sharing" } else { "Collaboration" };
-        let mut act = CollabAct::None;
-        ui.menu_button(RichText::new(label).color(if shared.is_some() { GREEN } else { TEXT }), |ui| {
-            act = collab_items(ui, shared.as_ref());
-        });
-        self.collab_apply(ui, tab_id, act);
-    }
-
     pub fn collab_apply(&mut self, ui: &egui::Ui, tab_id: u64, act: CollabAct) {
         match act {
             CollabAct::None => {}
