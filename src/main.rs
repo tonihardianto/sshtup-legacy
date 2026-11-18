@@ -7,6 +7,8 @@ mod fonts;
 mod hostcard;
 mod icons;
 mod lock;
+#[cfg(target_os = "macos")]
+mod macos_bar;
 mod lucide_data;
 mod model;
 mod relay_join;
@@ -65,6 +67,12 @@ fn main() -> eframe::Result {
         .with_min_inner_size([720.0, 440.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")) {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
+    // macOS: no separate title bar. The tab strip runs along the top of the window and the
+    // traffic lights sit on it (the strip leaves room for them and can be dragged).
+    #[cfg(target_os = "macos")]
+    {
+        viewport = viewport.with_fullsize_content_view(true).with_titlebar_shown(false).with_title_shown(false);
     }
     if shot.is_some() {
         // A check run must never steal focus from what the person is doing.
