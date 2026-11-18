@@ -10,8 +10,14 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Margin, Pos2, Re
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-const PILL: Color32 = Color32::from_rgb(0x2A, 0x2D, 0x42);
-const WELL: Color32 = Color32::from_rgb(0x10, 0x11, 0x22);
+#[allow(non_snake_case)]
+fn PILL() -> Color32 {
+    pick(0x2A2D42, 0xE3E6EE)
+}
+#[allow(non_snake_case)]
+fn WELL() -> Color32 {
+    pick(0x1E2236, 0xEEF0F5)
+}
 const ROW_H: f32 = 64.0;
 const PANEL_W: f32 = 372.0;
 
@@ -204,7 +210,7 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 let (arrow_rect, arrow) = ui.allocate_exact_size(Vec2::new(32.0, 38.0), Sense::click());
                 let (main_rect, main) = ui.allocate_exact_size(Vec2::new(label.size().x + 30.0, 38.0), Sense::click());
-                let ctl = |r: &egui::Response| if r.hovered() { BLUE.linear_multiply(1.15) } else { BLUE };
+                let ctl = |r: &egui::Response| if r.hovered() { BLUE().linear_multiply(1.15) } else { BLUE() };
                 ui.painter().rect_filled(main_rect, CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, ctl(&main));
                 ui.painter().rect_filled(arrow_rect, CornerRadius { nw: 0, sw: 0, ne: 8, se: 8 }, ctl(&arrow));
                 ui.painter().line_segment([arrow_rect.left_top() + Vec2::new(0.0, 7.0), arrow_rect.left_bottom() - Vec2::new(0.0, 7.0)], Stroke::new(1.0, Color32::from_white_alpha(70)));
@@ -249,7 +255,7 @@ impl App {
         } else {
             let w = ui.available_width();
             let (frame, _) = ui.allocate_exact_size(Vec2::new(w, ROW_H * rows.len() as f32), Sense::hover());
-            ui.painter().rect(frame, 10, CARD, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+            ui.painter().rect(frame, 10, CARD(), Stroke::new(1.0, BORDER()), StrokeKind::Inside);
             for (n, row) in rows.iter().enumerate() {
                 let r = Rect::from_min_size(frame.min + Vec2::new(0.0, ROW_H * n as f32), Vec2::new(w, ROW_H));
                 self.keychain_row(ui, r, row, n == 0, n + 1 == rows.len(), act);
@@ -264,44 +270,44 @@ impl App {
         let radius = CornerRadius { nw: if first { 9 } else { 0 }, ne: if first { 9 } else { 0 }, sw: if last { 9 } else { 0 }, se: if last { 9 } else { 0 } };
         let p = ui.painter();
         if on {
-            p.rect_filled(r.shrink(1.0), radius, BLUE.linear_multiply(0.13));
+            p.rect_filled(r.shrink(1.0), radius, BLUE().linear_multiply(0.13));
         } else if resp.hovered() {
-            p.rect_filled(r.shrink(1.0), radius, CARD_HOVER.linear_multiply(0.7));
+            p.rect_filled(r.shrink(1.0), radius, CARD_HOVER().linear_multiply(0.7));
         }
         if !last {
-            p.line_segment([Pos2::new(r.left() + 1.0, r.bottom()), Pos2::new(r.right() - 1.0, r.bottom())], Stroke::new(1.0, BORDER));
+            p.line_segment([Pos2::new(r.left() + 1.0, r.bottom()), Pos2::new(r.right() - 1.0, r.bottom())], Stroke::new(1.0, BORDER()));
         }
         // the icon
-        let accent = if row.warn { AMBER } else { BLUE };
+        let accent = if row.warn { AMBER() } else { BLUE() };
         let ib = Rect::from_center_size(Pos2::new(r.left() + 36.0, r.center().y), Vec2::splat(42.0));
         p.rect_filled(ib, 10, accent.linear_multiply(0.16));
         crate::icons::paint(p, ib.center(), 19.0, if !row.identity { Icon::Key } else { Icon::User }, accent);
         // the right-hand column
         let rx = r.right() - 18.0;
         let used = if row.used == 0 { "Not used yet".to_string() } else if row.identity || row.used > 1 { format!("Used by {} host{}", row.used, if row.used == 1 { "" } else { "s" }) } else { "Used by 1 host".to_string() };
-        let ug = p.layout_no_wrap(used, FontId::proportional(12.5), if row.used == 0 { MUTED } else { TEXT });
+        let ug = p.layout_no_wrap(used, FontId::proportional(12.5), if row.used == 0 { MUTED() } else { TEXT() });
         let ug_w = ug.size().x;
-        p.galley(Pos2::new(rx - ug_w, r.center().y - 19.0), ug, MUTED);
-        let wg = p.layout_no_wrap(row.when.clone(), FontId::proportional(12.0), MUTED);
+        p.galley(Pos2::new(rx - ug_w, r.center().y - 19.0), ug, MUTED());
+        let wg = p.layout_no_wrap(row.when.clone(), FontId::proportional(12.0), MUTED());
         let wg_w = wg.size().x;
-        p.galley(Pos2::new(rx - wg_w, r.center().y + 2.0), wg, MUTED);
+        p.galley(Pos2::new(rx - wg_w, r.center().y + 2.0), wg, MUTED());
         let avail_right = rx - ug_w.max(wg_w) - 16.0;
         // title, tag, badges
         let x0 = r.left() + 72.0;
-        let tg = p.layout_no_wrap(row.title.clone(), FontId::proportional(14.5), TEXT);
+        let tg = p.layout_no_wrap(row.title.clone(), FontId::proportional(14.5), TEXT());
         let mut x = x0 + tg.size().x;
-        p.galley(Pos2::new(x0, r.center().y - 21.0), tg, TEXT);
+        p.galley(Pos2::new(x0, r.center().y - 21.0), tg, TEXT());
         if !row.tag.is_empty() {
-            let g = p.layout_no_wrap(row.tag.clone(), FontId::monospace(11.0), MUTED);
+            let g = p.layout_no_wrap(row.tag.clone(), FontId::monospace(11.0), MUTED());
             let pill = Rect::from_min_size(Pos2::new(x + 10.0, r.center().y - 20.0), Vec2::new(g.size().x + 14.0, 19.0));
             if pill.right() < avail_right {
-                p.rect_filled(pill, 5, PILL);
-                p.galley(Pos2::new(pill.center().x - g.size().x / 2.0, pill.center().y - g.size().y / 2.0), g, MUTED);
+                p.rect_filled(pill, 5, PILL());
+                p.galley(Pos2::new(pill.center().x - g.size().x / 2.0, pill.center().y - g.size().y / 2.0), g, MUTED());
                 x = pill.right();
             }
         }
         for (icon, text, ok) in &row.badges {
-            let col = if *ok { GREEN } else { AMBER };
+            let col = if *ok { GREEN() } else { AMBER() };
             let g = p.layout_no_wrap(text.clone(), FontId::proportional(11.5), col);
             let mut pill = Rect::from_min_size(Pos2::new(x + 8.0, r.center().y - 20.0), Vec2::new(g.size().x + 30.0, 19.0));
             // too wide: keep only the icon
@@ -323,7 +329,7 @@ impl App {
         }
         // the line under the title
         let sub_font = if row.sub_mono { FontId::monospace(11.5) } else { FontId::proportional(12.5) };
-        p.text(Pos2::new(x0, r.center().y + 10.0), Align2::LEFT_CENTER, &row.sub, sub_font, MUTED);
+        p.text(Pos2::new(x0, r.center().y + 10.0), Align2::LEFT_CENTER, &row.sub, sub_font, MUTED());
         if resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -339,12 +345,12 @@ impl App {
     fn keychain_detail(&mut self, ui: &mut egui::Ui, act: &mut Option<Act>) {
         let Some(id) = self.kc.sel else { return };
         let identity = self.kc.tab == 1;
-        egui::Frame::new().fill(CARD).stroke(Stroke::new(1.0, BORDER)).corner_radius(12).inner_margin(Margin::same(20)).show(ui, |ui| {
+        egui::Frame::new().fill(CARD()).stroke(Stroke::new(1.0, BORDER())).corner_radius(12).inner_margin(Margin::same(20)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 8.0;
             if identity {
                 let Some(i) = self.vault.identities.iter().find(|x| x.id == id).cloned() else { return };
-                detail_header(ui, Icon::User, BLUE, &i.label, &format!("{}{}", if i.username.is_empty() { "No username".to_string() } else { i.username.clone() }, self.team_tag("identity", id)));
+                detail_header(ui, Icon::User, BLUE(), &i.label, &format!("{}{}", if i.username.is_empty() { "No username".to_string() } else { i.username.clone() }, self.team_tag("identity", id)));
                 ui.add_space(6.0);
                 section_label(ui, "SIGN-IN");
                 let key = i.key.and_then(|k| self.vault.keys.iter().find(|x| x.id == k)).map(|k| k.label.clone());
@@ -354,7 +360,7 @@ impl App {
                     (None, false) => "A saved password".to_string(),
                     (None, true) => "Nothing saved yet".to_string(),
                 };
-                ui.label(RichText::new(text).size(12.5).color(TEXT));
+                ui.label(RichText::new(text).size(12.5).color(TEXT()));
                 section_label(ui, "USED BY");
                 used_by(ui, &self.identity_used_by(id), "No host uses this identity yet.");
             } else {
@@ -369,7 +375,7 @@ impl App {
                 }
                 sub.push_str(&self.team_tag("key", id));
                 let warn = info.weak || info.protected == Some(false);
-                detail_header(ui, Icon::Key, if warn { AMBER } else { BLUE }, &k.label, &sub);
+                detail_header(ui, Icon::Key, if warn { AMBER() } else { BLUE() }, &k.label, &sub);
                 ui.add_space(6.0);
                 let mut notes: Vec<&str> = vec![];
                 if info.protected == Some(false) {
@@ -386,9 +392,9 @@ impl App {
                 }
                 section_label(ui, "FINGERPRINT");
                 if info.fingerprint.is_empty() {
-                    ui.label(RichText::new("Not available: there is no public key for this key.").size(12.0).color(MUTED));
+                    ui.label(RichText::new("Not available: there is no public key for this key.").size(12.0).color(MUTED()));
                 } else {
-                    ui.add(egui::Label::new(RichText::new(&info.fingerprint).monospace().size(12.0).color(TEXT)).wrap());
+                    ui.add(egui::Label::new(RichText::new(&info.fingerprint).monospace().size(12.0).color(TEXT())).wrap());
                 }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
@@ -400,9 +406,9 @@ impl App {
                     });
                 });
                 if !info.public.is_empty() {
-                    egui::Frame::new().fill(WELL).stroke(Stroke::new(1.0, BORDER)).corner_radius(8).inner_margin(Margin::same(12)).show(ui, |ui| {
+                    egui::Frame::new().fill(WELL()).stroke(Stroke::new(1.0, BORDER())).corner_radius(8).inner_margin(Margin::same(12)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.add(egui::Label::new(RichText::new(&info.public).monospace().size(11.5).color(TEXT)).wrap());
+                        ui.add(egui::Label::new(RichText::new(&info.public).monospace().size(11.5).color(TEXT())).wrap());
                     });
                 }
                 ui.add_space(4.0);
@@ -411,7 +417,7 @@ impl App {
             }
             ui.add_space(6.0);
             let (line, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-            ui.painter().rect_filled(line, 0, BORDER);
+            ui.painter().rect_filled(line, 0, BORDER());
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -531,7 +537,7 @@ impl App {
                 });
                 if ex.private {
                     ui.add_space(4.0);
-                    ui.label(RichText::new("The private key lets anyone sign in as you. Keep the copy somewhere safe.").size(12.0).color(AMBER));
+                    ui.label(RichText::new("The private key lets anyone sign in as you. Keep the copy somewhere safe.").size(12.0).color(AMBER()));
                 }
                 ui.add_space(6.0);
                 text_field(ui, "Save as", &mut ex.dest, "~/Downloads/key.pub", false);
@@ -546,9 +552,9 @@ impl App {
             });
             if go {
                 match self.export_key(&ex) {
-                    Ok(msg) => self.notify(msg, GREEN),
+                    Ok(msg) => self.notify(msg, GREEN()),
                     Err(e) => {
-                        self.notify(e, RED);
+                        self.notify(e, RED());
                         self.kc.export = Some(ex);
                     }
                 }
@@ -590,7 +596,7 @@ impl App {
 }
 
 fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).size(11.0).strong().color(MUTED));
+    ui.label(RichText::new(text).size(11.0).strong().color(MUTED()));
 }
 
 fn detail_header(ui: &mut egui::Ui, icon: Icon, accent: Color32, title: &str, sub: &str) {
@@ -600,19 +606,19 @@ fn detail_header(ui: &mut egui::Ui, icon: Icon, accent: Color32, title: &str, su
         crate::icons::paint(ui.painter(), r.center(), 21.0, icon, accent);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.add(egui::Label::new(RichText::new(title).size(18.0).strong().color(TEXT)).truncate());
-            ui.label(RichText::new(sub).size(12.5).color(MUTED));
+            ui.add(egui::Label::new(RichText::new(title).size(18.0).strong().color(TEXT())).truncate());
+            ui.label(RichText::new(sub).size(12.5).color(MUTED()));
         });
     });
 }
 
 fn warning_box(ui: &mut egui::Ui, text: &str) {
-    egui::Frame::new().fill(AMBER.linear_multiply(0.12)).stroke(Stroke::new(1.0, AMBER.linear_multiply(0.45))).corner_radius(8).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+    egui::Frame::new().fill(AMBER().linear_multiply(0.12)).stroke(Stroke::new(1.0, AMBER().linear_multiply(0.45))).corner_radius(8).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_top(|ui| {
             let (r, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-            crate::icons::paint(ui.painter(), r.center() + Vec2::new(0.0, 2.0), 16.0, Icon::Alert, AMBER);
-            ui.add(egui::Label::new(RichText::new(text).size(12.5).color(Color32::from_rgb(0xF0, 0xD5, 0x9A))).wrap());
+            crate::icons::paint(ui.painter(), r.center() + Vec2::new(0.0, 2.0), 16.0, Icon::Alert, AMBER());
+            ui.add(egui::Label::new(RichText::new(text).size(12.5).color(pick(0xF0D59A, 0x7A4A06))).wrap());
         });
     });
 }
@@ -620,17 +626,17 @@ fn warning_box(ui: &mut egui::Ui, text: &str) {
 /// Chips for the hosts (and identities) that use something.
 fn used_by(ui: &mut egui::Ui, items: &[(String, bool)], none: &str) {
     if items.is_empty() {
-        ui.label(RichText::new(none).size(12.5).color(MUTED));
+        ui.label(RichText::new(none).size(12.5).color(MUTED()));
         return;
     }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
         for (label, identity) in items {
-            let g = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(12.5), TEXT);
+            let g = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(12.5), TEXT());
             let (r, _) = ui.allocate_exact_size(Vec2::new(g.size().x + 30.0, 26.0), Sense::hover());
-            ui.painter().rect_filled(r, 13, PILL);
-            ui.painter().circle_filled(Pos2::new(r.left() + 12.0, r.center().y), 3.0, if *identity { BLUE } else { GREEN });
-            ui.painter().galley(Pos2::new(r.left() + 22.0, r.center().y - g.size().y / 2.0), g, TEXT);
+            ui.painter().rect_filled(r, 13, PILL());
+            ui.painter().circle_filled(Pos2::new(r.left() + 12.0, r.center().y), 3.0, if *identity { BLUE() } else { GREEN() });
+            ui.painter().galley(Pos2::new(r.left() + 22.0, r.center().y - g.size().y / 2.0), g, TEXT());
         }
     });
 }

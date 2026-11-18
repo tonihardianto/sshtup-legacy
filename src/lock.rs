@@ -117,7 +117,7 @@ impl App {
 
         let busy = lock.working.is_some();
         let mut submit = false;
-        egui::CentralPanel::default().frame(egui::Frame::new().fill(BG_CONTENT)).show_inside(ui, |_| {});
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(BG_CONTENT())).show_inside(ui, |_| {});
         egui::Window::new("vault_lock")
             .title_bar(false)
             .frame(egui::Frame::window(&ctx.global_style()).inner_margin(egui::Margin::symmetric(32, 26)))
@@ -130,9 +130,9 @@ impl App {
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.vertical_centered(|ui| {
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Vault is locked").size(17.0).strong().color(TEXT));
+                    ui.label(RichText::new("Vault is locked").size(17.0).strong().color(TEXT()));
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Enter your master password to continue.").size(12.5).color(MUTED));
+                    ui.label(RichText::new("Enter your master password to continue.").size(12.5).color(MUTED()));
                     ui.add_space(14.0);
                     let r = ui.add_enabled(
                         !busy,
@@ -148,16 +148,16 @@ impl App {
                     }
                     if let Some(e) = &lock.error {
                         ui.add_space(6.0);
-                        ui.label(RichText::new(e).size(12.0).color(RED));
+                        ui.label(RichText::new(e).size(12.0).color(RED()));
                     }
                     ui.add_space(8.0);
-                    ui.add_enabled(!busy, egui::Checkbox::new(&mut lock.remember, RichText::new("Keep me unlocked on this device").size(12.0).color(MUTED)));
+                    ui.add_enabled(!busy, egui::Checkbox::new(&mut lock.remember, RichText::new("Keep me unlocked on this device").size(12.0).color(MUTED())));
                     ui.add_space(8.0);
                     if busy {
-                        ui.label(RichText::new("Opening…").size(12.5).color(MUTED));
+                        ui.label(RichText::new("Opening…").size(12.5).color(MUTED()));
                     } else {
                         let clicked = ui
-                            .add_sized([ui.available_width(), 32.0], egui::Button::new(RichText::new("Unlock").color(egui::Color32::WHITE).strong().size(12.5)).fill(BLUE).stroke(egui::Stroke::NONE).corner_radius(6))
+                            .add_sized([ui.available_width(), 32.0], egui::Button::new(RichText::new("Unlock").color(egui::Color32::WHITE).strong().size(12.5)).fill(BLUE()).stroke(egui::Stroke::NONE).corner_radius(6))
                             .clicked();
                         if (clicked || enter) && !lock.input.is_empty() {
                             submit = true;
@@ -194,22 +194,22 @@ impl App {
         let mut remove = false;
         let su = &mut self.sec;
         if self.demo {
-            ui.label(RichText::new("Not available in a demo run.").size(12.0).color(MUTED));
+            ui.label(RichText::new("Not available in a demo run.").size(12.0).color(MUTED()));
             return;
         }
         if !encrypted {
-            ui.label(RichText::new("Hosts, saved passwords, key passphrases and snippets are stored unencrypted in vault.json, session logs and the command history are stored as plain text. A master password encrypts the vault, the logs and the history (Argon2id + XChaCha20-Poly1305).").size(12.0).color(MUTED));
+            ui.label(RichText::new("Hosts, saved passwords, key passphrases and snippets are stored unencrypted in vault.json, session logs and the command history are stored as plain text. A master password encrypts the vault, the logs and the history (Argon2id + XChaCha20-Poly1305).").size(12.0).color(MUTED()));
             ui.add_space(6.0);
             password_field(ui, &mut su.new_pw, "New master password");
             password_field(ui, &mut su.confirm, "Repeat the password");
             ui.add_space(4.0);
-            ui.label(RichText::new("There is no way to recover the vault if you forget this password.").size(12.0).color(AMBER));
+            ui.label(RichText::new("There is no way to recover the vault if you forget this password.").size(12.0).color(AMBER()));
             ui.add_space(6.0);
             if primary_button(ui, "Encrypt the vault").clicked() {
                 enable = true;
             }
         } else {
-            ui.label(RichText::new("The vault, the session logs and the command history are encrypted with your master password.").size(12.0).color(GREEN));
+            ui.label(RichText::new("The vault, the session logs and the command history are encrypted with your master password.").size(12.0).color(GREEN()));
             ui.add_space(6.0);
             let mut remember = *su.remember.get_or_insert_with(|| crate::keystore::load().is_some());
             if ui.checkbox(&mut remember, RichText::new("Unlock automatically on this device").size(12.5)).changed() {
@@ -226,7 +226,7 @@ impl App {
                     ("The master password is asked for every time the app opens.".into(), true)
                 });
             }
-            ui.label(RichText::new("The key is kept in the system keychain, guarded by your computer login.").size(11.5).color(MUTED));
+            ui.label(RichText::new("The key is kept in the system keychain, guarded by your computer login.").size(11.5).color(MUTED()));
             ui.add_space(8.0);
             password_field(ui, &mut su.current, "Current password");
             password_field(ui, &mut su.new_pw, "New password (to change it)");
@@ -243,7 +243,7 @@ impl App {
         }
         if let Some((m, ok)) = &su.message {
             ui.add_space(6.0);
-            ui.label(RichText::new(m).size(12.0).color(if *ok { GREEN } else { RED }));
+            ui.label(RichText::new(m).size(12.0).color(if *ok { GREEN() } else { RED() }));
         }
 
         if enable || change {

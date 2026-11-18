@@ -193,6 +193,10 @@ impl Snippet {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct Settings {
+    /// Look of the app itself: "dark", "light" or "system" (the terminal has its own `color_scheme`).
+    pub app_theme: String,
+    /// "inter", "dmsans", "system" or "default": the font of the app's own text.
+    pub ui_font: String,
     pub color_scheme: String,
     pub font_size: f32,
     /// Terminal font by name (see `fonts.rs`); empty = the built-in Hack.
@@ -230,6 +234,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            app_theme: "dark".into(),
+            ui_font: "inter".into(),
             color_scheme: DEFAULT_SCHEME.into(),
             font_size: DEFAULT_FONT_SIZE,
             font_family: String::new(),

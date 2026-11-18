@@ -62,7 +62,7 @@ impl CollabState {
         if st.status != Status::Live {
             return vec![];
         }
-        let mut v = vec![(me, BLUE)];
+        let mut v = vec![(me, BLUE())];
         for g in st.guests.iter().take(3) {
             let c = guest_color(g.gid);
             v.push((g.name.clone(), egui::Color32::from_rgb(c[0], c[1], c[2])));
@@ -98,14 +98,14 @@ pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>, can_share: bool) 
     match shared {
         None if !can_share => label_muted(ui, "Shared with you; it cannot be shared again"),
         None => {
-            if crate::ui::icon_item(ui, crate::icons::Icon::Users, "Share this terminal", crate::ui::TEXT).clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Users, "Share this terminal", crate::ui::TEXT()).clicked() {
                 act = CollabAct::Start;
                 ui.close();
             }
         }
         Some(s) => {
             label_muted(ui, &format!("Session code  {}", s.code()));
-            if crate::ui::icon_item(ui, crate::icons::Icon::Copy, "Copy session code", crate::ui::TEXT).clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Copy, "Copy session code", crate::ui::TEXT()).clicked() {
                 act = CollabAct::CopyCode;
                 ui.close();
             }
@@ -116,14 +116,14 @@ pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>, can_share: bool) 
                     ui.close();
                 }
             }
-            if crate::ui::icon_item(ui, crate::icons::Icon::Stop, "Stop sharing", crate::ui::RED).clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Stop, "Stop sharing", crate::ui::RED()).clicked() {
                 act = CollabAct::Stop;
                 ui.close();
             }
         }
     }
     ui.separator();
-    if crate::ui::icon_item(ui, crate::icons::Icon::Group, "Open Collaboration", crate::ui::TEXT).clicked() {
+    if crate::ui::icon_item(ui, crate::icons::Icon::Group, "Open Collaboration", crate::ui::TEXT()).clicked() {
         act = CollabAct::OpenScreen;
         ui.close();
     }
@@ -164,7 +164,7 @@ impl App {
             CollabAct::Start => self.collab_start(tab_id),
             CollabAct::Stop => {
                 self.collab.shares.retain(|s| s.tab_id != tab_id);
-                self.notify("Stopped sharing this terminal".into(), AMBER);
+                self.notify("Stopped sharing this terminal".into(), AMBER());
             }
             CollabAct::GuestType(gid, on) => {
                 if let Some(l) = self.collab.shares.iter().find(|s| s.tab_id == tab_id).and_then(|s| s.link.as_ref()) {
@@ -174,7 +174,7 @@ impl App {
             CollabAct::CopyCode => {
                 if let Some(s) = self.collab.shares.iter().find(|s| s.tab_id == tab_id) {
                     ui.ctx().copy_text(s.code());
-                    self.notify("Session code copied".into(), GREEN);
+                    self.notify("Session code copied".into(), GREEN());
                 }
             }
             CollabAct::OpenScreen => {
@@ -190,39 +190,39 @@ impl App {
         }
         // a guest cannot hand the host's terminal on: the host never agreed to that person
         if self.tabs.iter().any(|t| t.id == tab_id && t.sess.spec.is_guest()) {
-            self.notify("This terminal belongs to someone else's session, so it cannot be shared again.".into(), AMBER);
+            self.notify("This terminal belongs to someone else's session, so it cannot be shared again.".into(), AMBER());
             return;
         }
         let Some(cfg) = self.vault.sync.clone() else {
-            self.notify("Turn on Sync first: shared terminals use your Sync account and the relay of your Sync server.".into(), AMBER);
+            self.notify("Turn on Sync first: shared terminals use your Sync account and the relay of your Sync server.".into(), AMBER());
             return;
         };
         let link = self.tabs.iter().find(|t| t.id == tab_id).map(|t| start_host(cfg.server, cfg.token, t.sess.parser.clone(), t.sess.writer_handle(), t.sess.shared.clone(), self.ctx.clone(), self.my_name("host")));
         let msg = if link.is_some() { "Sharing started. Guests join with the session code" } else { "That terminal is gone" };
         self.collab.shares.push(Share { tab_id, local_code: make_code(tab_id), started: now_secs(), link });
-        self.notify(msg.into(), if self.collab.shares.last().map(|s| s.link.is_some()).unwrap_or(false) { GREEN } else { AMBER });
+        self.notify(msg.into(), if self.collab.shares.last().map(|s| s.link.is_some()).unwrap_or(false) { GREEN() } else { AMBER() });
     }
 
     pub fn collab_join(&mut self) {
         let Some(cfg) = self.vault.sync.clone() else {
-            self.notify("Turn on Sync first: joining a shared terminal needs an account on the same Sync server as the host.".into(), AMBER);
+            self.notify("Turn on Sync first: joining a shared terminal needs an account on the same Sync server as the host.".into(), AMBER());
             return;
         };
         let share = self.collab.join_code.trim().to_string();
         let Some((code, _)) = crate::wire::parse_share(&share) else {
-            self.notify("Paste the whole session code, including the part after the ~ sign".into(), RED);
+            self.notify("Paste the whole session code, including the part after the ~ sign".into(), RED());
             return;
         };
         // a one-time ticket from the sync server; the guest process shows it to the relay
         let pass = match sync_client::api::Api::new(&cfg.server, Some(cfg.token)).relay_pass() {
             Ok(p) => p,
             Err(e) => {
-                self.notify(crate::sync::runtime::describe(&e), RED);
+                self.notify(crate::sync::runtime::describe(&e), RED());
                 return;
             }
         };
         let Ok(exe) = std::env::current_exe() else {
-            self.notify("Could not start the guest view".into(), RED);
+            self.notify("Could not start the guest view".into(), RED());
             return;
         };
         let name = self.my_name("guest");
@@ -260,14 +260,14 @@ impl App {
             ui.spacing_mut().item_spacing = Vec2::splat(10.0);
 
             // honest note
-            Frame::new().fill(AMBER.linear_multiply(0.12)).stroke(egui::Stroke::new(1.0, AMBER.linear_multiply(0.5))).corner_radius(8).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+            Frame::new().fill(AMBER().linear_multiply(0.12)).stroke(egui::Stroke::new(1.0, AMBER().linear_multiply(0.5))).corner_radius(8).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 ui.set_width(w - 26.0);
                 if synced_for_relay {
-                    ui.label(RichText::new("Relay: your Sync server").strong().size(13.0).color(GREEN));
-                    ui.label(RichText::new("Shared terminals go through the relay of your Sync server and are end-to-end encrypted: the server cannot read them. Guests need an account on the same server.").size(12.0).color(MUTED));
+                    ui.label(RichText::new("Relay: your Sync server").strong().size(13.0).color(GREEN()));
+                    ui.label(RichText::new("Shared terminals go through the relay of your Sync server and are end-to-end encrypted: the server cannot read them. Guests need an account on the same server.").size(12.0).color(MUTED()));
                 } else {
-                    ui.label(RichText::new("Sync is off").strong().size(13.0).color(AMBER));
-                    ui.label(RichText::new("Shared terminals use the relay of your Sync server. Turn on Sync in Settings, then share a terminal.").size(12.0).color(MUTED));
+                    ui.label(RichText::new("Sync is off").strong().size(13.0).color(AMBER()));
+                    ui.label(RichText::new("Shared terminals use the relay of your Sync server. Turn on Sync in Settings, then share a terminal.").size(12.0).color(MUTED()));
                 }
             });
 
@@ -280,7 +280,7 @@ impl App {
                 label_muted(ui, "No teams yet. Create one in Settings → Sync.");
             }
             for t in &self.sync_rt.teams {
-                Frame::new().fill(CARD).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+                Frame::new().fill(CARD()).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                     ui.set_width(w - 24.0);
                     ui.label(RichText::new(format!("{}{}", t.name, if t.owner { "  ·  you own it" } else { "" })).size(14.0));
                     for m in &t.members {
@@ -289,7 +289,7 @@ impl App {
                             let initial = m.email.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
                             badge(ui.painter(), r, &initial, icon_color(&m.email));
                             ui.label(RichText::new(&m.email).size(12.5));
-                            ui.label(RichText::new(&m.role).size(11.5).color(MUTED));
+                            ui.label(RichText::new(&m.role).size(11.5).color(MUTED()));
                         });
                     }
                 });
@@ -301,7 +301,7 @@ impl App {
             // join someone else's session
             ui.add_space(6.0);
             section_title(ui, "JOIN A SHARED TERMINAL");
-            Frame::new().fill(CARD).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+            Frame::new().fill(CARD()).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                 ui.set_width(w - 24.0);
                 ui.horizontal(|ui| {
                     let r = ui.add(egui::TextEdit::singleline(&mut self.collab.join_code).hint_text("Session code, e.g. abcd-2345").desired_width(260.0).margin(Vec2::new(8.0, 7.0)));
@@ -320,7 +320,7 @@ impl App {
             }
             for (id, title) in &tabs {
                 let share = self.collab.shares.iter().find(|s| s.tab_id == *id).cloned();
-                Frame::new().fill(CARD).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
+                Frame::new().fill(CARD()).corner_radius(10).inner_margin(Margin::symmetric(12, 10)).show(ui, |ui| {
                     ui.set_width(w - 24.0);
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(Vec2::splat(32.0), egui::Sense::hover());
@@ -329,10 +329,10 @@ impl App {
                             ui.spacing_mut().item_spacing.y = 1.0;
                             ui.label(RichText::new(title).size(14.0));
                             match &share {
-                                None => ui.label(RichText::new("Not shared").size(11.5).color(MUTED)),
+                                None => ui.label(RichText::new("Not shared").size(11.5).color(MUTED())),
                                 Some(s) => {
                                     let (t, good) = s.status_line();
-                                    ui.label(RichText::new(t).size(11.5).color(if good { GREEN } else { AMBER }))
+                                    ui.label(RichText::new(t).size(11.5).color(if good { GREEN() } else { AMBER() }))
                                 }
                             };
                         });
@@ -363,7 +363,7 @@ impl App {
                                 ui.label(RichText::new(&g.name).size(13.0));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     let mut can = g.can_type;
-                                    ui.label(RichText::new("Can type").size(12.0).color(MUTED));
+                                    ui.label(RichText::new("Can type").size(12.0).color(MUTED()));
                                     if toggle(ui, &mut can).changed() {
                                         guest_toggle = Some((*id, g.gid, can));
                                     }
@@ -394,7 +394,7 @@ impl App {
         }
         if let Some(c) = copy {
             ui.ctx().copy_text(c);
-            self.notify("Session code copied".into(), GREEN);
+            self.notify("Session code copied".into(), GREEN());
         }
     }
 }

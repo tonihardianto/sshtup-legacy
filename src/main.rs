@@ -24,6 +24,7 @@ mod sftp;
 mod sync;
 mod term;
 mod ui;
+mod update;
 mod vaultcrypt;
 mod wire;
 

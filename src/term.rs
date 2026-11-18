@@ -572,7 +572,7 @@ fn search_bar(ctx: &egui::Context, id: egui::Id, rect: Rect, s: &mut SearchState
     let mut close = false;
     let w = (rect.width() - 24.0).clamp(200.0, 400.0);
     egui::Area::new(id.with("bar")).order(egui::Order::Foreground).fixed_pos(Pos2::new(rect.center().x - w / 2.0, rect.top() + 8.0)).show(ctx, |ui| {
-        egui::Frame::new().fill(CARD_HOVER).stroke(Stroke::new(1.0, BORDER)).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
+        egui::Frame::new().fill(CARD_HOVER()).stroke(Stroke::new(1.0, BORDER())).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
             ui.set_width(w - 16.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
@@ -601,14 +601,14 @@ fn search_bar(ctx: &egui::Context, id: egui::Id, rect: Rect, s: &mut SearchState
                 if r.has_focus() && esc {
                     close = true;
                 }
-                let (txt, col) = if status == "No results" { (status.as_str(), RED) } else { (status.as_str(), MUTED) };
+                let (txt, col) = if status == "No results" { (status.as_str(), RED()) } else { (status.as_str(), MUTED()) };
                 ui.add_sized([70.0, 20.0], egui::Label::new(egui::RichText::new(txt).size(11.5).color(col)));
                 for (ic, tip, d) in [(crate::icons::Icon::ChevUp, "Previous (Shift+Enter)", 1), (crate::icons::Icon::ChevDown, "Next (Enter)", -1)] {
                     let (b, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
                     if resp.hovered() {
-                        ui.painter().rect_filled(b, 5.0, crate::ui::CARD);
+                        ui.painter().rect_filled(b, 5.0, crate::ui::CARD());
                     }
-                    crate::icons::paint(ui.painter(), b.center(), 14.0, ic, if resp.hovered() { TEXT } else { MUTED });
+                    crate::icons::paint(ui.painter(), b.center(), 14.0, ic, if resp.hovered() { TEXT() } else { MUTED() });
                     if resp.on_hover_text(tip).clicked() {
                         // ▲ goes to the older match (up the screen), ▼ to the newer
                         dir = if d == 1 { -1 } else { 1 };
@@ -616,9 +616,9 @@ fn search_bar(ctx: &egui::Context, id: egui::Id, rect: Rect, s: &mut SearchState
                 }
                 let (b, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
                 if resp.hovered() {
-                    ui.painter().rect_filled(b, 5.0, crate::ui::CARD);
+                    ui.painter().rect_filled(b, 5.0, crate::ui::CARD());
                 }
-                crate::icons::paint(ui.painter(), b.center(), 12.0, crate::icons::Icon::Close, if resp.hovered() { TEXT } else { MUTED });
+                crate::icons::paint(ui.painter(), b.center(), 12.0, crate::icons::Icon::Close, if resp.hovered() { TEXT() } else { MUTED() });
                 if resp.on_hover_text("Close (Esc)").clicked() {
                     close = true;
                 }

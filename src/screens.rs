@@ -48,7 +48,6 @@ enum EdAct {
     None,
     Save,
     Cancel,
-    Delete,
     Connect,
     GenKey,
 }
@@ -79,7 +78,7 @@ pub(crate) fn item_card(ui: &mut egui::Ui, size: Vec2, title: &str, sub: &str, g
     let badge_rect = Rect::from_min_size(c.rect.min + Vec2::new(12.0, (size.y - bs) / 2.0), Vec2::splat(bs));
     badge(&p, badge_rect, glyph, color);
     if let Some(d) = dot {
-        p.circle_filled(Pos2::new(badge_rect.right() - 1.0, badge_rect.top() + 1.0), 5.5, CARD);
+        p.circle_filled(Pos2::new(badge_rect.right() - 1.0, badge_rect.top() + 1.0), 5.5, CARD());
         status_dot(&p, Pos2::new(badge_rect.right() - 1.0, badge_rect.top() + 1.0), d);
     }
     let tx = badge_rect.right() + 12.0;
@@ -87,26 +86,26 @@ pub(crate) fn item_card(ui: &mut egui::Ui, size: Vec2, title: &str, sub: &str, g
     let clip = Rect::from_min_max(Pos2::new(tx, c.rect.top()), Pos2::new(right_x.max(tx + 10.0), c.rect.bottom()));
     let pc = p.with_clip_rect(clip);
     if sub.is_empty() {
-        pc.text(Pos2::new(tx, c.rect.center().y), Align2::LEFT_CENTER, title, FontId::proportional(14.0), TEXT);
+        pc.text(Pos2::new(tx, c.rect.center().y), Align2::LEFT_CENTER, title, FontId::proportional(14.0), TEXT());
     } else {
-        pc.text(Pos2::new(tx, c.rect.center().y - 8.0), Align2::LEFT_CENTER, title, FontId::proportional(14.0), TEXT);
-        pc.text(Pos2::new(tx, c.rect.center().y + 9.0), Align2::LEFT_CENTER, sub, FontId::proportional(11.5), MUTED);
+        pc.text(Pos2::new(tx, c.rect.center().y - 8.0), Align2::LEFT_CENTER, title, FontId::proportional(14.0), TEXT());
+        pc.text(Pos2::new(tx, c.rect.center().y + 9.0), Align2::LEFT_CENTER, sub, FontId::proportional(11.5), MUTED());
     }
     let rr = Rect::from_center_size(Pos2::new(c.rect.right() - 10.0 - right_w / 2.0, c.rect.center().y), Vec2::new(right_w, 26.0));
     let rresp = ui.interact(rr, c.resp.id.with("right"), Sense::click());
     if !right.is_empty() {
         if rresp.hovered() {
-            p.rect_filled(rr, 6.0, BORDER);
+            p.rect_filled(rr, 6.0, BORDER());
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        p.text(rr.center(), Align2::CENTER_CENTER, right, FontId::proportional(12.5), if rresp.hovered() { TEXT } else { MUTED });
+        p.text(rr.center(), Align2::CENTER_CENTER, right, FontId::proportional(12.5), if rresp.hovered() { TEXT() } else { MUTED() });
     }
     (c.resp, rresp)
 }
 
 fn combo_id(ui: &mut egui::Ui, salt: &str, cur: &mut Option<u64>, items: &[(u64, String)], none: &str) {
     let text = cur.and_then(|c| items.iter().find(|i| i.0 == c)).map(|i| i.1.clone()).unwrap_or_else(|| none.to_string());
-    egui::ComboBox::from_id_salt(salt).width(ui.available_width() - 8.0).selected_text(text).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(salt).width(ui.available_width()).selected_text(text).show_ui(ui, |ui| {
         ui.selectable_value(cur, None, none);
         for (id, l) in items {
             ui.selectable_value(cur, Some(*id), l.clone());
@@ -127,7 +126,7 @@ pub(crate) fn empty_state(ui: &mut egui::Ui, title: &str, text: &str) {
     ui.vertical_centered(|ui| {
         ui.label(RichText::new(title).size(18.0).strong());
         ui.add_space(4.0);
-        ui.label(RichText::new(text).size(13.0).color(MUTED));
+        ui.label(RichText::new(text).size(13.0).color(MUTED()));
     });
 }
 
@@ -138,6 +137,57 @@ fn parse_tags(s: &str) -> Vec<String> {
 fn sanitize(s: &str) -> String {
     let t: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     if t.is_empty() { "key".into() } else { t }
+}
+
+/// The right-hand panel the form lives in; it slides in and out.
+fn editor_panel_shell() -> egui::Panel {
+    egui::Panel::right("editor").exact_size(340.0).resizable(false).frame(Frame::new().fill(CARD()).inner_margin(Margin::same(16)).stroke(egui::Stroke::new(1.0, BORDER())))
+}
+
+fn editor_item_id(ed: &Editor) -> u64 {
+    match ed {
+        Editor::Host(x) => x.id,
+        Editor::Group(x) => x.id,
+        Editor::Key(x) => x.id,
+        Editor::Identity(x) => x.id,
+        Editor::Forward(x) => x.id,
+        Editor::Snippet(x) => x.id,
+        Editor::None => 0,
+    }
+}
+
+/// The line under the form title: what is being edited.
+fn editor_subtitle(ed: &Editor, is_new: bool) -> String {
+    if is_new {
+        return "Not saved yet".into();
+    }
+    match ed {
+        Editor::Host(h) => format!("{} · {}", h.display_label(), if h.protocol == Protocol::Ssh { "SSH" } else { "Telnet" }),
+        Editor::Group(g) => g.name.clone(),
+        Editor::Key(k) => k.label.clone(),
+        Editor::Identity(i) => i.label.clone(),
+        Editor::Forward(f) => f.label.clone(),
+        Editor::Snippet(s) => s.display_label(),
+        Editor::None => String::new(),
+    }
+}
+
+/// True once Save was pressed with a required field empty, so fields start showing their errors.
+fn tried_save(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("editor-tried-save"))).unwrap_or(false)
+}
+
+/// A form can't be saved while one of its required fields is empty.
+fn missing_required(ed: &Editor) -> bool {
+    match ed {
+        Editor::Host(h) => h.address.trim().is_empty(),
+        Editor::Group(g) => g.name.trim().is_empty(),
+        Editor::Key(k) => k.label.trim().is_empty(),
+        Editor::Identity(i) => i.label.trim().is_empty(),
+        Editor::Forward(f) => f.host.is_none(),
+        Editor::Snippet(s) => s.script.trim().is_empty(),
+        Editor::None => false,
+    }
 }
 
 impl App {
@@ -159,7 +209,7 @@ impl App {
             expand_home(&k.path)
         };
         if std::path::Path::new(&path).exists() {
-            self.notify("A file with that path already exists - choose another path".into(), AMBER);
+            self.notify("A file with that path already exists - choose another path".into(), AMBER());
             return;
         }
         if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -172,10 +222,10 @@ impl App {
                 k.generated = true;
                 k.added = now_secs();
                 k.public_key = std::fs::read_to_string(format!("{}.pub", path)).unwrap_or_default().trim().to_string();
-                self.notify("New key created".into(), GREEN);
+                self.notify("New key created".into(), GREEN());
             }
-            Ok(o) => self.notify(format!("ssh-keygen failed: {}", String::from_utf8_lossy(&o.stderr).trim()), RED),
-            Err(e) => self.notify(format!("Could not run ssh-keygen: {}", e), RED),
+            Ok(o) => self.notify(format!("ssh-keygen failed: {}", String::from_utf8_lossy(&o.stderr).trim()), RED()),
+            Err(e) => self.notify(format!("Could not run ssh-keygen: {}", e), RED()),
         }
     }
 
@@ -261,13 +311,42 @@ impl App {
     // --------------------------------------------------------- edit panel --
 
     pub fn editor_panel(&mut self, ui: &mut egui::Ui) {
-        if matches!(self.editor, Editor::None) {
+        let snap_id = egui::Id::new("editor-snapshot");
+        let live = !matches!(self.editor, Editor::None);
+        // While the panel slides shut the form is already gone, so it is drawn from the last frame it had.
+        let (mut ed, is_new) = if live {
+            (std::mem::replace(&mut self.editor, Editor::None), self.editor_new)
+        } else {
             self.sync_rt.ui.new_scope = None;
-            return;
-        }
-        let mut ed = std::mem::replace(&mut self.editor, Editor::None);
+            match ui.ctx().data(|d| d.get_temp::<(Editor, bool)>(snap_id)) {
+                Some(s) => s,
+                None => {
+                    // closed: still ask the panel every frame, so its next opening has something to slide from
+                    let mut open = false;
+                    editor_panel_shell().show_collapsible(ui, &mut open, |_| {});
+                    return;
+                }
+            }
+        };
         let mut act = EdAct::None;
-        let is_new = self.editor_new;
+        if live {
+            ui.ctx().data_mut(|d| d.insert_temp(snap_id, (ed.clone(), is_new)));
+            // a different form than last frame: forget any "tried to save" error state
+            use std::hash::{Hash, Hasher};
+            let mut hs = std::collections::hash_map::DefaultHasher::new();
+            std::mem::discriminant(&ed).hash(&mut hs);
+            editor_item_id(&ed).hash(&mut hs);
+            is_new.hash(&mut hs);
+            let key = hs.finish();
+            let key_id = egui::Id::new("editor-key");
+            let ctx = ui.ctx();
+            if ctx.data(|d| d.get_temp::<u64>(key_id)) != Some(key) {
+                ctx.data_mut(|d| {
+                    d.insert_temp(key_id, key);
+                    d.insert_temp(egui::Id::new("editor-tried-save"), false);
+                });
+            }
+        }
         let (title, can_connect) = match &ed {
             Editor::Host(_) => (if is_new { "New Host" } else { "Edit Host" }, true),
             Editor::Group(_) => (if is_new { "New Group" } else { "Edit Group" }, false),
@@ -277,38 +356,53 @@ impl App {
             Editor::Snippet(_) => (if is_new { "New Snippet" } else { "Edit Snippet" }, false),
             Editor::None => ("", false),
         };
-        egui::Panel::right("editor")
-            .exact_size(340.0)
-            .frame(Frame::new().fill(CARD).inner_margin(Margin::same(16)).stroke(egui::Stroke::new(1.0, BORDER)))
-            .show(ui, |ui| {
+        let mut expanded = live;
+        let prev_anim = ui.style().animation_time;
+        ui.style_mut().animation_time = 0.3;
+        let shown = editor_panel_shell().show_collapsible(ui, &mut expanded, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(title).size(17.0).strong());
+                    let (tile, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
+                    ui.painter().rect_filled(tile, 8.0, BLUE().linear_multiply(0.18));
+                    let tile_icon = match &ed {
+                        Editor::Host(_) | Editor::None => crate::icons::Icon::Host,
+                        Editor::Group(_) => crate::icons::Icon::Group,
+                        Editor::Key(_) => crate::icons::Icon::Key,
+                        Editor::Identity(_) => crate::icons::Icon::User,
+                        Editor::Forward(_) => crate::icons::Icon::Forward,
+                        Editor::Snippet(_) => crate::icons::Icon::Snippet,
+                    };
+                    crate::icons::paint(ui.painter(), tile.center(), 17.0, tile_icon, BLUE());
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        ui.label(RichText::new(title).size(15.0).strong());
+                        ui.label(RichText::new(editor_subtitle(&ed, is_new)).size(11.5).color(MUTED()));
+                    });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (cr, cresp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
                         if cresp.hovered() {
-                            ui.painter().rect_filled(cr, 6.0, BORDER);
+                            ui.painter().rect_filled(cr, 6.0, BORDER());
                         }
-                        crate::icons::paint(ui.painter(), cr.center(), 12.0, crate::icons::Icon::Close, MUTED);
+                        crate::icons::paint(ui.painter(), cr.center(), 12.0, crate::icons::Icon::Close, MUTED());
                         if cresp.clicked() {
                             act = EdAct::Cancel;
                         }
                     });
                 });
                 ui.add_space(6.0);
-                egui::Panel::bottom("editor_buttons").frame(Frame::new().inner_margin(Margin { top: 8, ..Default::default() })).show(ui, |ui| {
-                    ui.horizontal(|ui| {
+                egui::Panel::bottom("editor_buttons").show_separator_line(false).resizable(false).frame(Frame::new().inner_margin(Margin { top: 8, ..Default::default() })).show(ui, |ui| {
+                    ui.separator();
+                    ui.add_space(2.0);
+                    // right-aligned: Save is the rightmost (primary), Save & connect sits to its left
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if primary_button(ui, "Save").clicked() {
                             act = EdAct::Save;
                         }
-                        if can_connect && flat_button(ui, "Connect").clicked() {
+                        if can_connect && flat_button(ui, "Save & connect").clicked() {
                             act = EdAct::Connect;
-                        }
-                        if !is_new && danger_button(ui, "Delete").clicked() {
-                            act = EdAct::Delete;
                         }
                     });
                 });
-                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink(false).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     self.editor_fields(ui, &mut ed, &mut act);
                     if is_new {
@@ -333,29 +427,41 @@ impl App {
                         }
                     }
                 });
-            });
+        });
+        ui.style_mut().animation_time = prev_anim;
+        if shown.is_none() {
+            // not on screen yet (just opened) or finished closing
+            if live {
+                self.editor = ed;
+            } else {
+                ui.ctx().data_mut(|d| d.remove::<(Editor, bool)>(snap_id));
+            }
+            return;
+        }
+        if !live {
+            return;
+        }
+        let tried = egui::Id::new("editor-tried-save");
+        let ctx = ui.ctx().clone();
+        // a required field is empty: keep the form open and let the field show its error
+        if matches!(act, EdAct::Save | EdAct::Connect) && missing_required(&ed) {
+            ctx.data_mut(|d| d.insert_temp(tried, true));
+            act = EdAct::None;
+        }
         match act {
             EdAct::None => self.editor = ed,
-            EdAct::Cancel => {}
+            EdAct::Cancel => {
+                ctx.data_mut(|d| d.insert_temp(tried, false));
+            }
             EdAct::Save => {
+                ctx.data_mut(|d| d.insert_temp(tried, false));
                 self.commit_editor(ed);
             }
             EdAct::Connect => {
+                ctx.data_mut(|d| d.insert_temp(tried, false));
                 if let Some(id) = self.commit_editor(ed) {
                     self.connect_host(id);
                 }
-            }
-            EdAct::Delete => {
-                match &ed {
-                    Editor::Host(h) => self.confirm = Some(Del::Host(h.id)),
-                    Editor::Group(g) => self.confirm = Some(Del::Group(g.id)),
-                    Editor::Key(k) => self.confirm = Some(Del::Key(k.id)),
-                    Editor::Identity(i) => self.confirm = Some(Del::Identity(i.id)),
-                    Editor::Forward(f) => self.confirm = Some(Del::Forward(f.id)),
-                    Editor::Snippet(s) => self.confirm = Some(Del::Snippet(s.id)),
-                    Editor::None => {}
-                }
-                self.editor = ed;
             }
             EdAct::GenKey => {
                 if let Editor::Key(k) = &mut ed {
@@ -376,48 +482,76 @@ impl App {
         let hosts: Vec<(u64, String)> = self.vault.hosts.iter().map(|h| (h.id, h.display_label())).collect();
         match ed {
             Editor::Host(h) => {
-                text_field(ui, "Label", &mut h.label, "My server", false);
-                text_field(ui, "Address", &mut h.address, "Hostname or IP address", false);
-                field(ui, "Protocol", |ui| {
-                    egui::ComboBox::from_id_salt("proto").width(ui.available_width() - 8.0).selected_text(if h.protocol == Protocol::Ssh { "SSH" } else { "Telnet" }).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut h.protocol, Protocol::Ssh, "SSH");
-                        ui.selectable_value(&mut h.protocol, Protocol::Telnet, "Telnet");
-                    });
-                });
+                use crate::icons::Icon;
+                let tried = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("editor-tried-save"))).unwrap_or(false);
+                form_section(ui, "General");
+                text_field_ex(ui, "Label", false, None, Some(Icon::Pencil), &mut h.label, "My server", false);
+                let addr_err = (tried && h.address.trim().is_empty()).then_some("Enter a hostname or IP address.");
+                text_field_ex(ui, "Address", true, addr_err, Some(Icon::Host), &mut h.address, "Hostname or IP address", false);
                 let hint = h.effective_port().to_string();
-                text_field(ui, "Port", &mut self.edit_a, &hint, false);
-                text_field(ui, "Username", &mut h.username, "root", false);
-                text_field(ui, "Password", &mut h.password, "Optional", true);
-                if h.protocol == Protocol::Ssh {
-                    field(ui, "Key", |ui| combo_id(ui, "hkey", &mut h.key, &keys, "(none)"));
-                    field(ui, "Identity", |ui| combo_id(ui, "hid", &mut h.identity, &idents, "(none)"));
-                    let jumps: Vec<(u64, String)> = hosts.iter().filter(|x| x.0 != h.id).cloned().collect();
-                    field(ui, "Jump host", |ui| combo_id(ui, "hjump", &mut h.jump_host, &jumps, "(none)"));
-                    field(ui, "Run snippet after connecting", |ui| combo_id(ui, "hsn", &mut h.startup_snippet, &snippets, "(none)"));
-                    ui.horizontal(|ui| {
-                        toggle(ui, &mut h.agent_forwarding);
-                        ui.label("Agent forwarding");
-                    });
-                    ui.add_space(4.0);
-                }
+                let edit_a = &mut self.edit_a;
+                split_row(
+                    ui,
+                    Some(84.0),
+                    |ui| {
+                        field(ui, "Protocol", |ui| {
+                            egui::ComboBox::from_id_salt("proto").width(ui.available_width()).selected_text(if h.protocol == Protocol::Ssh { "SSH" } else { "Telnet" }).show_ui(ui, |ui| {
+                                ui.selectable_value(&mut h.protocol, Protocol::Ssh, "SSH");
+                                ui.selectable_value(&mut h.protocol, Protocol::Telnet, "Telnet");
+                            });
+                        });
+                    },
+                    |ui| text_field(ui, "Port", edit_a, &hint, false),
+                );
                 field(ui, "Group", |ui| combo_id(ui, "hgroup", &mut h.group, &groups, "(none)"));
-                text_field(ui, "Tags (comma separated)", &mut self.edit_b, "web, prod", false);
-                field(ui, "Color scheme", |ui| {
-                    let cur = h.color_scheme.clone().unwrap_or_else(|| "(app default)".into());
-                    egui::ComboBox::from_id_salt("hscheme").width(ui.available_width() - 8.0).selected_text(cur).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut h.color_scheme, None, "(app default)");
-                        for s in SCHEMES {
-                            ui.selectable_value(&mut h.color_scheme, Some(s.name.to_string()), s.name);
-                        }
+
+                form_section(ui, "Authentication");
+                text_field_ex(ui, "Username", false, None, Some(Icon::User), &mut h.username, "root", false);
+                text_field_ex(ui, "Password", false, None, Some(Icon::Lock), &mut h.password, "Optional", true);
+                if h.protocol == Protocol::Ssh {
+                    split_row(
+                        ui,
+                        None,
+                        |ui| field(ui, "Key", |ui| combo_id(ui, "hkey", &mut h.key, &keys, "(none)")),
+                        |ui| field(ui, "Identity", |ui| combo_id(ui, "hid", &mut h.identity, &idents, "(none)")),
+                    );
+                }
+
+                ui.add_space(6.0);
+                egui::CollapsingHeader::new(RichText::new("Advanced").size(12.0).color(MUTED())).id_salt("host-advanced").default_open(false).show_unindented(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    if h.protocol == Protocol::Ssh {
+                        let jumps: Vec<(u64, String)> = hosts.iter().filter(|x| x.0 != h.id).cloned().collect();
+                        field(ui, "Jump host", |ui| combo_id(ui, "hjump", &mut h.jump_host, &jumps, "(none)"));
+                        field(ui, "Run snippet after connecting", |ui| combo_id(ui, "hsn", &mut h.startup_snippet, &snippets, "(none)"));
+                        ui.horizontal(|ui| {
+                            toggle(ui, &mut h.agent_forwarding);
+                            ui.label("Agent forwarding");
+                        });
+                        ui.add_space(4.0);
+                    }
+                    text_field(ui, "Tags (comma separated)", &mut self.edit_b, "web, prod", false);
+                    field(ui, "Color scheme", |ui| {
+                        let cur = h.color_scheme.clone().unwrap_or_else(|| "(app default)".into());
+                        egui::ComboBox::from_id_salt("hscheme").width(ui.available_width()).selected_text(cur).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut h.color_scheme, None, "(app default)");
+                            for s in SCHEMES {
+                                ui.selectable_value(&mut h.color_scheme, Some(s.name.to_string()), s.name);
+                            }
+                        });
                     });
                 });
             }
             Editor::Group(g) => {
-                text_field(ui, "Name", &mut g.name, "Group name", false);
+                let tried = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("editor-tried-save"))).unwrap_or(false);
+                let err = (tried && g.name.trim().is_empty()).then_some("Enter a group name.");
+                text_field_ex(ui, "Name", true, err, Some(crate::icons::Icon::Pencil), &mut g.name, "Group name", false);
                 let others: Vec<(u64, String)> = groups.iter().filter(|x| x.0 != g.id).cloned().collect();
                 field(ui, "Parent group", |ui| combo_id(ui, "gparent", &mut g.parent, &others, "(top level)"));
             }
             Editor::Key(k) => {
+                use crate::icons::Icon;
+                let tried = tried_save(ui);
                 if self.editor_new {
                     if let Some(p) = key_drop_zone(ui) {
                         if k.label.trim().is_empty() {
@@ -426,11 +560,14 @@ impl App {
                         k.path = p;
                         k.public_key.clear();
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(2.0);
                 }
-                text_field(ui, "Label", &mut k.label, "id_ed25519", false);
-                text_field(ui, "Private key file", &mut k.path, "~/.ssh/id_ed25519", false);
-                text_field(ui, "Passphrase", &mut k.passphrase, "Optional", true);
+                form_section(ui, "Key");
+                let err = (tried && k.label.trim().is_empty()).then_some("Enter a label.");
+                text_field_ex(ui, "Label", true, err, Some(Icon::Pencil), &mut k.label, "id_ed25519", false);
+                text_field_ex(ui, "Private key file", false, None, Some(Icon::File), &mut k.path, "~/.ssh/id_ed25519", false);
+                text_field_ex(ui, "Passphrase", false, None, Some(Icon::Lock), &mut k.passphrase, "Optional", true);
+                ui.add_space(4.0);
                 ui.checkbox(&mut k.sync_contents, "Also sync this key file to my other devices (encrypted)");
                 ui.add_space(4.0);
                 if flat_button(ui, "Generate new ed25519 key").on_hover_text("Creates the key file with ssh-keygen using the path and passphrase above").clicked() {
@@ -442,47 +579,79 @@ impl App {
                     }
                 }
                 if !k.public_key.is_empty() {
-                    ui.add_space(6.0);
-                    label_muted(ui, "Public key");
-                    ui.add(egui::Label::new(RichText::new(&k.public_key).monospace().size(10.5)).wrap());
+                    form_section(ui, "Public key");
+                    egui::Frame::new().fill(BG_WINDOW()).stroke(egui::Stroke::new(1.0, BORDER())).corner_radius(6).inner_margin(Margin::same(10)).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.add(egui::Label::new(RichText::new(&k.public_key).monospace().size(10.5)).wrap());
+                    });
                     if flat_button(ui, "Copy public key").clicked() {
                         ui.ctx().copy_text(k.public_key.clone());
                     }
                 }
             }
             Editor::Identity(i) => {
-                text_field(ui, "Label", &mut i.label, "Work account", false);
-                text_field(ui, "Username", &mut i.username, "root", false);
-                text_field(ui, "Password", &mut i.password, "Optional", true);
+                use crate::icons::Icon;
+                let tried = tried_save(ui);
+                form_section(ui, "Identity");
+                let err = (tried && i.label.trim().is_empty()).then_some("Enter a label.");
+                text_field_ex(ui, "Label", true, err, Some(Icon::Pencil), &mut i.label, "Work account", false);
+                form_section(ui, "Authentication");
+                text_field_ex(ui, "Username", false, None, Some(Icon::User), &mut i.username, "root", false);
+                text_field_ex(ui, "Password", false, None, Some(Icon::Lock), &mut i.password, "Optional", true);
                 field(ui, "Key", |ui| combo_id(ui, "ikey", &mut i.key, &keys, "(none)"));
             }
             Editor::Forward(f) => {
-                text_field(ui, "Label", &mut f.label, "Optional", false);
+                use crate::icons::Icon;
+                let tried = tried_save(ui);
+                form_section(ui, "General");
+                text_field_ex(ui, "Label", false, None, Some(Icon::Pencil), &mut f.label, "Optional", false);
                 field(ui, "Type", |ui| {
-                    egui::ComboBox::from_id_salt("ftype").width(ui.available_width() - 8.0).selected_text(f.kind.name()).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("ftype").width(ui.available_width()).selected_text(f.kind.name()).show_ui(ui, |ui| {
                         for t in [PfType::Local, PfType::Remote, PfType::Dynamic] {
                             ui.selectable_value(&mut f.kind, t, t.name());
                         }
                     });
                 });
-                field(ui, "Host", |ui| combo_id(ui, "fhost", &mut f.host, &hosts, "(choose a host)"));
-                text_field(ui, "Bind address", &mut f.bound_address, "127.0.0.1", false);
-                field(ui, if f.kind == PfType::Remote { "Port on the server" } else { "Local port" }, |ui| {
-                    ui.add(egui::DragValue::new(&mut f.local_port).range(0..=65535));
-                });
+                field_label(ui, "Host", true);
+                combo_id(ui, "fhost", &mut f.host, &hosts, "(choose a host)");
+                if tried && f.host.is_none() {
+                    ui.label(RichText::new("Choose a host.").size(11.5).color(RED()));
+                }
+                form_section(ui, if f.kind == PfType::Remote { "Listen on the server" } else { "Listen on this device" });
+                let port_w = 84.0;
+                split_row(
+                    ui,
+                    Some(port_w),
+                    |ui| text_field_ex(ui, "Bind address", false, None, Some(Icon::Host), &mut f.bound_address, "127.0.0.1", false),
+                    |ui| field(ui, "Port", |ui| {
+                        ui.add_sized([ui.available_width(), 34.0], egui::DragValue::new(&mut f.local_port).range(0..=65535));
+                    }),
+                );
                 if f.kind != PfType::Dynamic {
-                    text_field(ui, "Destination host", &mut f.hostname, "localhost", false);
-                    field(ui, "Destination port", |ui| {
-                        ui.add(egui::DragValue::new(&mut f.remote_port).range(0..=65535));
-                    });
+                    form_section(ui, "Forward to");
+                    split_row(
+                        ui,
+                        Some(port_w),
+                        |ui| text_field_ex(ui, "Destination host", false, None, Some(Icon::Host), &mut f.hostname, "localhost", false),
+                        |ui| field(ui, "Port", |ui| {
+                            ui.add_sized([ui.available_width(), 34.0], egui::DragValue::new(&mut f.remote_port).range(0..=65535));
+                        }),
+                    );
                 }
             }
             Editor::Snippet(s) => {
-                text_field(ui, "Label", &mut s.label, "Optional", false);
-                field(ui, "Script", |ui| {
-                    ui.add(egui::TextEdit::multiline(&mut s.script).font(egui::TextStyle::Monospace).desired_rows(8).desired_width(f32::INFINITY).hint_text("ls -la"));
-                });
-                text_field(ui, "Package", &mut s.package, "Optional", false);
+                use crate::icons::Icon;
+                let tried = tried_save(ui);
+                form_section(ui, "Snippet");
+                text_field_ex(ui, "Label", false, None, Some(Icon::Pencil), &mut s.label, "Optional", false);
+                field_label(ui, "Script", true);
+                let script_missing = tried && s.script.trim().is_empty();
+                multiline_box(ui, egui::Id::new("snippet-script"), &mut s.script, "ls -la", 8, script_missing);
+                if script_missing {
+                    ui.label(RichText::new("Enter a script.").size(11.5).color(RED()));
+                }
+                ui.add_space(2.0);
+                text_field_ex(ui, "Package", false, None, Some(Icon::Folder), &mut s.package, "Optional", false);
             }
             Editor::None => {}
         }
@@ -502,21 +671,21 @@ impl App {
             let w = (ui.available_width() - 216.0).max(180.0);
             let (rect, _) = ui.allocate_exact_size(Vec2::new(w, 38.0), Sense::hover());
             let hint = if cfg!(target_os = "macos") { "Cmd K" } else { "Ctrl K" };
-            let hint_galley = ui.painter().layout_no_wrap(hint.into(), FontId::monospace(11.5), MUTED);
+            let hint_galley = ui.painter().layout_no_wrap(hint.into(), FontId::monospace(11.5), MUTED());
             let hint_w = hint_galley.size().x + 14.0;
             let inner = Rect::from_min_max(rect.min + Vec2::new(40.0, 0.0), rect.max - Vec2::new(hint_w + 18.0, 0.0));
             let search_id = egui::Id::new("hosts-search");
             let focused = ui.memory(|m| m.has_focus(search_id));
-            ui.painter().rect(rect, 8.0, CARD, egui::Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE } else { BORDER }), egui::StrokeKind::Inside);
+            ui.painter().rect(rect, 8.0, CARD(), egui::Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE() } else { BORDER() }), egui::StrokeKind::Inside);
             let mut edit_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
             let r = edit_ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::new("hosts-search")).frame(Frame::NONE).hint_text("Search by name, user or IP, or type ssh user@host -p 22").desired_width(inner.width()).margin(Vec2::new(0.0, 0.0)).vertical_align(egui::Align::Center).min_size(Vec2::new(0.0, 38.0)));
             if std::mem::take(&mut self.focus_search) {
                 r.request_focus();
             }
-            crate::icons::paint(ui.painter(), Pos2::new(rect.left() + 20.0, rect.center().y), 15.0, crate::icons::Icon::Search, MUTED);
+            crate::icons::paint(ui.painter(), Pos2::new(rect.left() + 20.0, rect.center().y), 15.0, crate::icons::Icon::Search, MUTED());
             let chip = Rect::from_center_size(Pos2::new(rect.right() - 12.0 - hint_w / 2.0, rect.center().y), Vec2::new(hint_w, 22.0));
-            ui.painter().rect(chip, 5.0, Color32::from_rgb(0x1B, 0x1E, 0x30), egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
-            ui.painter().galley(Pos2::new(chip.left() + 7.0, chip.center().y - hint_galley.size().y / 2.0), hint_galley, MUTED);
+            ui.painter().rect(chip, 5.0, pick(0x1B1E30, 0xE9ECF2), egui::Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+            ui.painter().galley(Pos2::new(chip.left() + 7.0, chip.center().y - hint_galley.size().y / 2.0), hint_galley, MUTED());
 
             let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if enter && !q.is_empty() {
@@ -530,15 +699,15 @@ impl App {
 
             // grid / list switch (the active one is filled)
             let (sw, _) = ui.allocate_exact_size(Vec2::new(70.0, 38.0), Sense::hover());
-            ui.painter().rect(sw, 8.0, CARD, egui::Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+            ui.painter().rect(sw, 8.0, CARD(), egui::Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
             for (i, (icon, grid_mode, tip)) in [(crate::icons::Icon::Group, true, "Grid"), (crate::icons::Icon::List, false, "List")].into_iter().enumerate() {
                 let cell = Rect::from_min_size(sw.min + Vec2::new(4.0 + i as f32 * 31.0, 4.0), Vec2::new(30.0, 30.0));
                 let on = self.vault.settings.grid_layout == grid_mode;
                 let resp = ui.interact(cell, egui::Id::new(("hosts-layout", i)), Sense::click()).on_hover_text(tip);
                 if on || resp.hovered() {
-                    ui.painter().rect_filled(cell, 6.0, if on { BORDER } else { CARD_HOVER });
+                    ui.painter().rect_filled(cell, 6.0, if on { BORDER() } else { CARD_HOVER() });
                 }
-                crate::icons::paint(ui.painter(), cell.center(), 14.0, icon, if on { TEXT } else { MUTED });
+                crate::icons::paint(ui.painter(), cell.center(), 14.0, icon, if on { TEXT() } else { MUTED() });
                 if resp.clicked() && !on {
                     self.vault.settings.grid_layout = grid_mode;
                     self.dirty = true;
@@ -551,8 +720,8 @@ impl App {
             let (main_rect, main) = ui.allocate_exact_size(Vec2::new(label.size().x + 30.0, 38.0), Sense::click());
             let (arrow_rect, arrow) = ui.allocate_exact_size(Vec2::new(32.0, 38.0), Sense::click());
             let ctl = |r: &egui::Response, base: Color32| if r.hovered() { base.linear_multiply(1.15) } else { base };
-            ui.painter().rect_filled(main_rect, egui::CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, ctl(&main, BLUE));
-            ui.painter().rect_filled(arrow_rect, egui::CornerRadius { nw: 0, sw: 0, ne: 8, se: 8 }, ctl(&arrow, BLUE));
+            ui.painter().rect_filled(main_rect, egui::CornerRadius { nw: 8, sw: 8, ne: 0, se: 0 }, ctl(&main, BLUE()));
+            ui.painter().rect_filled(arrow_rect, egui::CornerRadius { nw: 0, sw: 0, ne: 8, se: 8 }, ctl(&arrow, BLUE()));
             ui.painter().line_segment([arrow_rect.left_top() + Vec2::new(0.0, 7.0), arrow_rect.left_bottom() - Vec2::new(0.0, 7.0)], egui::Stroke::new(1.0, Color32::from_white_alpha(70)));
             ui.painter().galley(Pos2::new(main_rect.left() + 15.0, main_rect.center().y - label.size().y / 2.0), label, Color32::WHITE);
             crate::icons::paint(ui.painter(), arrow_rect.center() + Vec2::new(1.0, 0.0), 12.0, crate::icons::Icon::ChevDown, Color32::WHITE);
@@ -591,13 +760,13 @@ impl App {
         // breadcrumb: only inside a group, where it is the way back up (at the top it would be a label with no use)
         if self.cur_group.is_some() {
             ui.horizontal(|ui| {
-                if ui.add(egui::Label::new(RichText::new("All hosts").size(13.0).color(BLUE)).sense(Sense::click())).clicked() {
+                if ui.add(egui::Label::new(RichText::new("All hosts").size(13.0).color(BLUE())).sense(Sense::click())).clicked() {
                     acts.push(HAct::OpenGroup(None));
                 }
                 let path: Vec<(u64, String)> = self.vault.group_path(self.cur_group).iter().map(|g| (g.id, g.name.clone())).collect();
                 for (id, name) in path {
                     label_muted(ui, "›");
-                    if ui.add(egui::Label::new(RichText::new(name).size(13.0).color(BLUE)).sense(Sense::click())).clicked() {
+                    if ui.add(egui::Label::new(RichText::new(name).size(13.0).color(BLUE())).sense(Sense::click())).clicked() {
                         acts.push(HAct::OpenGroup(Some(id)));
                     }
                 }
@@ -614,7 +783,7 @@ impl App {
 
         let looks_quick = !q.is_empty() && (q.contains('@') || q.starts_with("ssh "));
         if looks_quick {
-            let (r, _) = item_card(ui, Vec2::new(ui.available_width().min(420.0), 56.0), &format!("Connect to {}", self.search.trim()), "Quick connect", "icon:terminal", GREEN, None, "", 0.0, false);
+            let (r, _) = item_card(ui, Vec2::new(ui.available_width().min(420.0), 56.0), &format!("Connect to {}", self.search.trim()), "Quick connect", "icon:terminal", GREEN(), None, "", 0.0, false);
             if r.clicked() {
                 acts.push(HAct::Quick(self.search.trim().to_string()));
             }
@@ -713,7 +882,7 @@ impl App {
             ui.set_width(320.0);
             label_muted(ui, "Enter the session code the host gave you.");
             ui.add_space(6.0);
-            let r = ui.add(egui::TextEdit::singleline(&mut self.collab.join_code).hint_text("e.g. abcd-2345").desired_width(f32::INFINITY).margin(Vec2::new(10.0, 7.0)));
+            let r = input_box(ui, egui::Id::new("join-code"), &mut self.collab.join_code, "e.g. abcd-2345", Some(crate::icons::Icon::Users), false, false);
             if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 join = true;
             }
@@ -739,7 +908,7 @@ impl App {
     pub(crate) fn import_ssh_config(&mut self) {
         let path = expand_home("~/.ssh/config");
         let Ok(text) = std::fs::read_to_string(&path) else {
-            self.notify("No ~/.ssh/config found".into(), AMBER);
+            self.notify("No ~/.ssh/config found".into(), AMBER());
             return;
         };
         struct Entry {
@@ -798,7 +967,7 @@ impl App {
             self.dirty = true;
         }
         let msg = if added == 0 && skipped == 0 { "No hosts found in ~/.ssh/config".to_string() } else { format!("Imported {added} host(s){}", if skipped > 0 { format!(", {skipped} already saved") } else { String::new() }) };
-        self.notify(msg, if added > 0 { GREEN } else { AMBER });
+        self.notify(msg, if added > 0 { GREEN() } else { AMBER() });
     }
 
     fn apply_host_acts(&mut self, acts: Vec<HAct>) {
@@ -892,10 +1061,12 @@ impl App {
             ui.set_width(380.0);
             label_muted(ui, "Pick a private key file. A copy is kept in the app, so the original can stay where it is.");
             ui.add_space(8.0);
-            label_muted(ui, "File");
+            field_label(ui, "File", false);
             ui.horizontal(|ui| {
                 let w = (ui.available_width() - 90.0).max(100.0);
-                ui.add(egui::TextEdit::singleline(&mut st.path).hint_text("~/.ssh/id_ed25519").desired_width(w).margin(Vec2::new(8.0, 7.0)));
+                ui.allocate_ui(Vec2::new(w, 34.0), |ui| {
+                    input_box(ui, egui::Id::new("import-key-path"), &mut st.path, "~/.ssh/id_ed25519", Some(crate::icons::Icon::File), false, false);
+                });
                 ui.add_enabled_ui(!picking, |ui| {
                     if flat_button(ui, if picking { "Waiting…" } else { "Browse…" }).clicked() {
                         browse = true;
@@ -930,10 +1101,10 @@ impl App {
         if go {
             match self.import_key_file(&st) {
                 Ok(msg) => {
-                    self.notify(msg, GREEN);
+                    self.notify(msg, GREEN());
                     return;
                 }
-                Err(e) => self.notify(e, RED),
+                Err(e) => self.notify(e, RED()),
             }
         }
         self.key_import = Some(st);
@@ -997,7 +1168,7 @@ impl App {
             for f in &self.vault.forwards {
                 let hl = self.host_label(f.host);
                 let live = self.forwards_live.contains_key(&f.id);
-                let (c, r) = item_card(ui, Vec2::new(w, 60.0), &f.display_label(&hl), &if f.label.is_empty() { f.kind.name().to_string() } else { f.describe(&hl) }, "icon:forward", icon_color(f.kind.name()), if live { Some(GREEN) } else { None }, if live { "Stop" } else { "Start" }, 56.0, false);
+                let (c, r) = item_card(ui, Vec2::new(w, 60.0), &f.display_label(&hl), &if f.label.is_empty() { f.kind.name().to_string() } else { f.describe(&hl) }, "icon:forward", icon_color(f.kind.name()), if live { Some(GREEN()) } else { None }, if live { "Stop" } else { "Start" }, 56.0, false);
                 if r.clicked() {
                     toggle_id = Some(f.id);
                 } else if c.clicked() {
@@ -1060,7 +1231,7 @@ impl App {
                 }
                 self.dirty = true;
             } else {
-                self.notify("Open a terminal first, then run the snippet".into(), AMBER);
+                self.notify("Open a terminal first, then run the snippet".into(), AMBER());
             }
         }
         if new_s {
@@ -1226,18 +1397,18 @@ impl App {
 fn key_drop_zone(ui: &mut egui::Ui) -> Option<String> {
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.0), egui::Sense::hover());
     let over = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
-    let col = if over { BLUE } else { BORDER };
+    let col = if over { BLUE() } else { BORDER() };
     if over {
-        ui.painter().rect_filled(r, 8, BLUE.linear_multiply(0.08));
+        ui.painter().rect_filled(r, 8, BLUE().linear_multiply(0.08));
     }
     let rr = r.shrink(0.5);
     let c = [rr.left_top(), rr.right_top(), rr.right_bottom(), rr.left_bottom(), rr.left_top()];
     for pair in c.windows(2) {
         ui.painter().extend(egui::Shape::dashed_line(&[pair[0], pair[1]], egui::Stroke::new(1.0, col), 5.0, 4.0));
     }
-    let g = ui.painter().layout_no_wrap("Drop a key file here to import it".into(), FontId::proportional(12.5), MUTED);
+    let g = ui.painter().layout_no_wrap("Drop a key file here to import it".into(), FontId::proportional(12.5), MUTED());
     let x0 = r.center().x - (24.0 + g.size().x) / 2.0;
-    crate::icons::paint(ui.painter(), Pos2::new(x0 + 7.0, r.center().y), 14.0, crate::icons::Icon::Download, MUTED);
-    ui.painter().galley(Pos2::new(x0 + 24.0, r.center().y - g.size().y / 2.0), g, MUTED);
+    crate::icons::paint(ui.painter(), Pos2::new(x0 + 7.0, r.center().y), 14.0, crate::icons::Icon::Download, MUTED());
+    ui.painter().galley(Pos2::new(x0 + 24.0, r.center().y - g.size().y / 2.0), g, MUTED());
     ui.ctx().input(|i| i.raw.dropped_files.iter().find_map(|f| Some(f.path()).filter(|p| !p.as_os_str().is_empty()).map(|p| p.to_string_lossy().to_string())))
 }
