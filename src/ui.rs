@@ -44,6 +44,7 @@ pub fn install_style(ctx: &egui::Context) {
         s.spacing.button_padding = Vec2::new(12.0, 6.0);
         s.spacing.interact_size.y = 30.0;
         s.visuals.menu_corner_radius = CornerRadius::same(8);
+        s.spacing.menu_margin = egui::Margin::same(8);
     });
 }
 
