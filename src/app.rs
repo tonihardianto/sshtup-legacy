@@ -577,6 +577,13 @@ impl App {
     }
 
     /// Opens another terminal of the same session next to (or below) tab `id`.
+    /// Opens a new tab with the same session (host or local shell) as tab `id`.
+    pub fn duplicate_tab(&mut self, id: u64) {
+        let Some(t) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let spec = t.sess.spec.clone();
+        self.open_session(spec);
+    }
+
     /// Asks which host the second terminal of tab `id` should show.
     pub fn ask_split(&mut self, id: u64, side_by_side: bool) {
         if self.tabs.iter().find(|t| t.id == id).map(|t| t.split.is_some()).unwrap_or(true) {
@@ -723,6 +730,7 @@ impl App {
         let mut to_open_local = false;
         let mut split_req: Option<(u64, Option<bool>)> = None;
         let mut search_req: Option<u64> = None;
+        let dup = std::cell::Cell::new(None::<u64>);
         let mut collab_act: Option<(u64, crate::collab::CollabAct)> = None;
         // macOS draws the window buttons on top of this strip: keep the tabs clear of them
         let (left_pad, strip_h, top_pad) = if cfg!(target_os = "macos") { (84, 48.0, 8) } else { (10, 42.0, 10) };
@@ -742,44 +750,11 @@ impl App {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
                     }
                 }
-                ui.horizontal(|ui| {
+ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    let (c, _, _) = tab_button(ui, self.screen.title(), self.active.is_none(), false, None, Some(self.screen.glyph()));
-                    if c {
-                        self.active = None;
-                    }
-                    let ids: Vec<(u64, String, Color32)> = self
-                        .tabs
-                        .iter()
-                        .filter(|t| t.pane_of.is_none())
-                        .map(|t| (t.id, t.title.clone(), if t.sess.shared.alive.load(std::sync::atomic::Ordering::Relaxed) { GREEN } else { RED }))
-                        .collect();
-                    for (id, title, dot) in ids {
-                        let people = self.people_of(id);
-                        let (c, x, resp) = tab_button_with(ui, &title, self.active == Some(id), true, Some(dot), None, &people);
-                        let act = std::cell::Cell::new(crate::collab::CollabAct::None);
-                        let sh = self.collab.shares.iter().find(|s| s.tab_id == id).cloned();
-                        let can_share = self.tabs.iter().find(|t| t.id == id).map(|t| !t.sess.spec.is_guest()).unwrap_or(true);
-                        resp.context_menu(|ui| act.set(crate::collab::collab_items(ui, sh.as_ref(), can_share)));
-                        if act.get() != crate::collab::CollabAct::None {
-                            collab_act = Some((id, act.get()));
-                        }
-                        if c {
-                            self.active = Some(id);
-                            if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
-                                t.focus_next = true;
-                            }
-                        }
-                        if x {
-                            to_close = Some(id);
-                        }
-                    }
-                    let plus = ui.add(egui::Button::new(RichText::new("+").size(16.0).color(MUTED)).fill(Color32::TRANSPARENT).stroke(egui::Stroke::NONE).min_size(Vec2::new(28.0, 28.0)));
-                    if plus.on_hover_text("New session").clicked() {
-                        to_open_local = true;
-                    }
-                    if let Some(id) = self.active {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // the buttons on the right stay put; the tabs take what is left and scroll
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(id) = self.active {
                             let split = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.split);
                             if split.is_some() {
                                 if split_button(ui, SplitIcon::Close, "Close the extra terminal").clicked() {
@@ -797,8 +772,60 @@ impl App {
                                 let target = split.filter(|s| s.second_focused).map(|s| s.second).unwrap_or(id);
                                 search_req = Some(target);
                             }
-                        });
+                        }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            let (c, _, _) = tab_button(ui, self.screen.title(), self.active.is_none(), false, None, Some(self.screen.glyph()));
+                    if c {
+                        self.active = None;
                     }
+                    egui::ScrollArea::horizontal().id_salt("tab_scroll").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                let ids: Vec<(u64, String, Color32)> = self
+                        .tabs
+                        .iter()
+                        .filter(|t| t.pane_of.is_none())
+                        .map(|t| (t.id, t.title.clone(), if t.sess.shared.alive.load(std::sync::atomic::Ordering::Relaxed) { GREEN } else { RED }))
+                        .collect();
+                    for (id, title, dot) in ids {
+                        let people = self.people_of(id);
+                        let (c, x, resp) = tab_button_with(ui, &title, self.active == Some(id), true, Some(dot), None, &people);
+                        // a tab that has just become the active one scrolls into view
+                        if self.active == Some(id) && ui.memory(|m| m.data.get_temp::<Option<u64>>(egui::Id::new("tabs_seen")).flatten()) != Some(id) {
+                            resp.scroll_to_me(None);
+                        }
+                        let act = std::cell::Cell::new(crate::collab::CollabAct::None);
+                        let sh = self.collab.shares.iter().find(|s| s.tab_id == id).cloned();
+                        let can_share = self.tabs.iter().find(|t| t.id == id).map(|t| !t.sess.spec.is_guest()).unwrap_or(true);
+                        resp.context_menu(|ui| {
+                            if crate::ui::icon_item(ui, crate::icons::Icon::Copy, "Duplicate", TEXT).clicked() {
+                                dup.set(Some(id));
+                                ui.close();
+                            }
+                            ui.separator();
+                            act.set(crate::collab::collab_items(ui, sh.as_ref(), can_share));
+                        });
+                        if act.get() != crate::collab::CollabAct::None {
+                            collab_act = Some((id, act.get()));
+                        }
+                        if c {
+                            self.active = Some(id);
+                            if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                                t.focus_next = true;
+                            }
+                        }
+                        if x {
+                            to_close = Some(id);
+                        }
+                    }
+                    let plus = ui.add(egui::Button::new(RichText::new("+").size(16.0).color(MUTED)).fill(Color32::TRANSPARENT).stroke(egui::Stroke::NONE).min_size(Vec2::new(28.0, 28.0)));
+                    if plus.on_hover_text("New session").clicked() {
+                        to_open_local = true;
+                    }
+                    });
+                        });
+                    });
+                    ui.memory_mut(|m| m.data.insert_temp(egui::Id::new("tabs_seen"), self.active));
                 });
             });
         if let Some((id, a)) = collab_act {
@@ -806,6 +833,9 @@ impl App {
         }
         if let Some(id) = to_close {
             self.close_tab(id);
+        }
+        if let Some(id) = dup.get() {
+            self.duplicate_tab(id);
         }
         if let Some(t) = self.tabs.iter_mut().find(|t| Some(t.id) == search_req) {
             t.view.search.get_or_insert_with(Default::default).focus_input = true;
