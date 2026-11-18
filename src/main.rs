@@ -15,6 +15,8 @@ mod model;
 mod relay_join;
 mod typing_osc;
 mod welcome;
+mod keychain;
+mod key_info;
 mod schemes;
 mod screens;
 mod settings_ui;

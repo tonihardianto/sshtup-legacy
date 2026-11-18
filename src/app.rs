@@ -183,6 +183,7 @@ pub struct App {
     pub vault_key: Option<crate::vaultcrypt::VaultKey>,
     pub sec: crate::lock::SecurityUi,
     pub wel: crate::welcome::WelcomeUi,
+    pub kc: crate::keychain::KeychainUi,
     pub sync_rt: crate::sync::runtime::SyncRuntime,
 }
 
@@ -330,6 +331,7 @@ impl App {
             vault_key: None,
             sec: Default::default(),
             wel: Default::default(),
+            kc: Default::default(),
             sync_rt: Default::default(),
         };
         if app.demo && std::env::var("SSHTUP_DEMO_AC").is_ok() {

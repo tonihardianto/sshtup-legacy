@@ -169,6 +169,8 @@ impl App {
         match out {
             Ok(o) if o.status.success() => {
                 k.path = path.clone();
+                k.generated = true;
+                k.added = now_secs();
                 k.public_key = std::fs::read_to_string(format!("{}.pub", path)).unwrap_or_default().trim().to_string();
                 self.notify("New key created".into(), GREEN);
             }
@@ -208,6 +210,9 @@ impl App {
             }
             Editor::Key(mut k) => {
                 if new {
+                    if k.added == 0 {
+                        k.added = now_secs();
+                    }
                     k.id = self.vault.new_id();
                     self.vault.keys.push(k.clone());
                     self.sync_place_new("key", k.id);
@@ -413,6 +418,16 @@ impl App {
                 field(ui, "Parent group", |ui| combo_id(ui, "gparent", &mut g.parent, &others, "(top level)"));
             }
             Editor::Key(k) => {
+                if self.editor_new {
+                    if let Some(p) = key_drop_zone(ui) {
+                        if k.label.trim().is_empty() {
+                            k.label = p.rsplit('/').next().unwrap_or("").to_string();
+                        }
+                        k.path = p;
+                        k.public_key.clear();
+                    }
+                    ui.add_space(8.0);
+                }
                 text_field(ui, "Label", &mut k.label, "id_ed25519", false);
                 text_field(ui, "Private key file", &mut k.path, "~/.ssh/id_ed25519", false);
                 text_field(ui, "Passphrase", &mut k.passphrase, "Optional", true);
@@ -854,7 +869,7 @@ impl App {
     // ----------------------------------------------------------- keychain --
 
     /// Window for importing a private key from a file: the file is copied into the app's own key folder.
-    fn key_import_window(&mut self, ctx: &egui::Context) {
+    pub(crate) fn key_import_window(&mut self, ctx: &egui::Context) {
         let Some(mut st) = self.key_import.take() else { return };
         if let Some(rx) = &st.picking {
             match rx.try_recv() {
@@ -957,76 +972,9 @@ impl App {
         }
         let label = if st.label.trim().is_empty() { name } else { st.label.trim().to_string() };
         let id = self.vault.new_id();
-        self.vault.keys.push(SshKey { id, label: label.clone(), path: dest_s, passphrase: st.passphrase.clone(), public_key, sync_contents: false });
+        self.vault.keys.push(SshKey { id, label: label.clone(), path: dest_s, passphrase: st.passphrase.clone(), public_key, sync_contents: false, added: now_secs(), generated: false });
         self.dirty = true;
         Ok(format!("Imported key {label}"))
-    }
-
-    pub fn screen_keychain(&mut self, ui: &mut egui::Ui) {
-        let mut new_key = false;
-        let mut new_ident = false;
-        let mut import = false;
-        let mut edit: Option<Editor> = None;
-        page_header(ui, "Keychain", |ui| {
-            if icon_text_button(ui, crate::icons::Icon::Upload, "Import from file").clicked() {
-                import = true;
-            }
-            if primary_button(ui, "+ New Key").clicked() {
-                new_key = true;
-            }
-            if flat_button(ui, "New Identity").clicked() {
-                new_ident = true;
-            }
-        });
-        if self.vault.keys.is_empty() && self.vault.identities.is_empty() {
-            empty_state(ui, "Keychain is empty", "Keys and identities you add here can be reused by any host.");
-        }
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::splat(10.0);
-            let w = ((ui.available_width() - 10.0) / 2.0).floor().max(240.0).min(ui.available_width() - 1.0);
-            let size = Vec2::new(w, 60.0);
-            if !self.vault.keys.is_empty() {
-                section_title(ui, "Keys");
-                ui.horizontal_wrapped(|ui| {
-                    for k in &self.vault.keys {
-                        let (c, _) = item_card(ui, size, &k.label, &format!("{}{}", k.path, self.team_tag("key", k.id)), "icon:key", icon_color(&k.label), None, "", 0.0, false);
-                        if c.clicked() {
-                            edit = Some(Editor::Key(k.clone()));
-                        }
-                    }
-                });
-            }
-            if !self.vault.identities.is_empty() {
-                section_title(ui, "Identities");
-                ui.horizontal_wrapped(|ui| {
-                    for i in &self.vault.identities {
-                        let (c, _) = item_card(ui, size, &i.label, &format!("{}{}", i.username, self.team_tag("identity", i.id)), "icon:user", icon_color(&i.label), None, "", 0.0, false);
-                        if c.clicked() {
-                            edit = Some(Editor::Identity(i.clone()));
-                        }
-                    }
-                });
-            }
-        });
-        if self.demo && std::env::var("SSHTUP_OPEN_IMPORT").is_ok() && self.key_import.is_none() {
-            import = true;
-        }
-        if import && self.key_import.is_none() {
-            self.key_import = Some(KeyImport::default());
-        }
-        self.key_import_window(ui.ctx());
-        if new_key {
-            edit = Some(Editor::Key(SshKey::default()));
-            self.editor_new = true;
-        } else if new_ident {
-            edit = Some(Editor::Identity(Identity::default()));
-            self.editor_new = true;
-        } else if edit.is_some() {
-            self.editor_new = false;
-        }
-        if let Some(e) = edit {
-            self.editor = e;
-        }
     }
 
     // --------------------------------------------------- port forwarding --
@@ -1272,4 +1220,24 @@ impl App {
             self.confirm = Some(Del::Log(p));
         }
     }
+}
+
+/// "Drop a key file here to fill in the path": returns the path of a file dropped on it.
+fn key_drop_zone(ui: &mut egui::Ui) -> Option<String> {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 56.0), egui::Sense::hover());
+    let over = ui.ctx().input(|i| !i.raw.hovered_files.is_empty());
+    let col = if over { BLUE } else { BORDER };
+    if over {
+        ui.painter().rect_filled(r, 8, BLUE.linear_multiply(0.08));
+    }
+    let rr = r.shrink(0.5);
+    let c = [rr.left_top(), rr.right_top(), rr.right_bottom(), rr.left_bottom(), rr.left_top()];
+    for pair in c.windows(2) {
+        ui.painter().extend(egui::Shape::dashed_line(&[pair[0], pair[1]], egui::Stroke::new(1.0, col), 5.0, 4.0));
+    }
+    let g = ui.painter().layout_no_wrap("Drop a key file here to import it".into(), FontId::proportional(12.5), MUTED);
+    let x0 = r.center().x - (24.0 + g.size().x) / 2.0;
+    crate::icons::paint(ui.painter(), Pos2::new(x0 + 7.0, r.center().y), 14.0, crate::icons::Icon::Download, MUTED);
+    ui.painter().galley(Pos2::new(x0 + 24.0, r.center().y - g.size().y / 2.0), g, MUTED);
+    ui.ctx().input(|i| i.raw.dropped_files.iter().find_map(|f| Some(f.path()).filter(|p| !p.as_os_str().is_empty()).map(|p| p.to_string_lossy().to_string())))
 }

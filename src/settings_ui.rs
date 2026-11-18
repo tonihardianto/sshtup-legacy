@@ -500,8 +500,13 @@ fn preview(ui: &mut egui::Ui, s: &Settings, below: bool) {
 
 /// The search box at the top right of Settings.
 fn search_box(ui: &mut egui::Ui, text: &mut String, width: f32) {
+    search_field(ui, text, width, "settings-search", "Search settings (font, cursor, history…)");
+}
+
+/// A rounded search box with a magnifier and a clear button.
+pub(crate) fn search_field(ui: &mut egui::Ui, text: &mut String, width: f32, id: &str, hint: &str) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
-    let id = egui::Id::new("settings-search");
+    let id = egui::Id::new(id);
     let focused = ui.memory(|m| m.has_focus(id));
     ui.painter().rect(rect, 8.0, CARD, Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE } else { BORDER }), StrokeKind::Inside);
     icons::paint(ui.painter(), Pos2::new(rect.left() + 17.0, rect.center().y), 14.0, Icon::Search, MUTED);
@@ -512,7 +517,7 @@ fn search_box(ui: &mut egui::Ui, text: &mut String, width: f32) {
         egui::TextEdit::singleline(text)
             .id(id)
             .frame(Frame::NONE)
-            .hint_text("Search settings (font, cursor, history…)")
+            .hint_text(hint)
             .desired_width(inner.width())
             .margin(Vec2::ZERO)
             .vertical_align(egui::Align::Center)
