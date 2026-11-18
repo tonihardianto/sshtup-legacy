@@ -982,11 +982,46 @@ impl App {
                 self.toast = None;
                 return;
             }
-            egui::Area::new(egui::Id::new("toast")).anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -24.0)).order(egui::Order::Foreground).show(ctx, |ui| {
-                Frame::new().fill(CARD_HOVER).stroke(egui::Stroke::new(1.0, col)).corner_radius(8).inner_margin(Margin::symmetric(14, 9)).show(ui, |ui| {
-                    ui.label(RichText::new(msg).size(13.0));
+            let mut close = false;
+            egui::Area::new(egui::Id::new("toast")).anchor(Align2::RIGHT_BOTTOM, Vec2::new(-24.0, -64.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+                Frame::new().fill(CARD_HOVER).stroke(egui::Stroke::new(1.0, BORDER)).corner_radius(10).inner_margin(Margin { left: 12, right: 8, top: 10, bottom: 10 }).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(10.0, 0.0);
+                    ui.horizontal(|ui| {
+                        // status mark: a check, a cross or an exclamation mark in a tinted circle
+                        let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
+                        let p = ui.painter();
+                        p.circle_filled(r.center(), 11.0, col.linear_multiply(0.22));
+                        let st = egui::Stroke::new(1.8, col);
+                        let c = r.center();
+                        if col == GREEN {
+                            p.line_segment([c + Vec2::new(-4.5, 0.5), c + Vec2::new(-1.5, 3.5)], st);
+                            p.line_segment([c + Vec2::new(-1.5, 3.5), c + Vec2::new(4.5, -3.5)], st);
+                        } else if col == RED {
+                            p.line_segment([c + Vec2::new(-3.5, -3.5), c + Vec2::new(3.5, 3.5)], st);
+                            p.line_segment([c + Vec2::new(-3.5, 3.5), c + Vec2::new(3.5, -3.5)], st);
+                        } else {
+                            p.line_segment([c + Vec2::new(0.0, -4.5), c + Vec2::new(0.0, 1.0)], st);
+                            p.circle_filled(c + Vec2::new(0.0, 4.2), 1.1, col);
+                        }
+                        // the message on one line when it fits, wrapped at 380 px when it does not
+                        let g = ui.painter().layout(msg.clone(), egui::FontId::proportional(13.0), TEXT, 380.0);
+                        let (tr, _) = ui.allocate_exact_size(g.size(), egui::Sense::hover());
+                        ui.painter().galley(tr.min, g, TEXT);
+                        let (xr, xresp) = ui.allocate_exact_size(Vec2::splat(24.0), egui::Sense::click());
+                        if xresp.hovered() {
+                            ui.painter().rect_filled(xr, 6.0, Color32::from_rgb(0x34, 0x38, 0x51));
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                        }
+                        crate::icons::paint(ui.painter(), xr.center(), 12.0, crate::icons::Icon::Close, if xresp.hovered() { TEXT } else { MUTED });
+                        if xresp.on_hover_text("Dismiss").clicked() {
+                            close = true;
+                        }
+                    });
                 });
             });
+            if close {
+                self.toast = None;
+            }
             ctx.request_repaint_after(Duration::from_millis(500));
         }
         if let Some(d) = self.confirm.clone() {
