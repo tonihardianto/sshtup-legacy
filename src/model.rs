@@ -107,6 +107,12 @@ pub struct SshKey {
     /// Send the key file itself to the other devices (off unless the person asks). The path stays per device.
     #[serde(default)]
     pub sync_contents: bool,
+    /// When the key was added (seconds since 1970); 0 for keys saved before this was recorded.
+    #[serde(default)]
+    pub added: u64,
+    /// Made by the app (otherwise it was imported or pointed at).
+    #[serde(default)]
+    pub generated: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -450,8 +456,27 @@ pub fn demo_vault() -> Vault {
     v.groups.push(Group { id: prod, name: "Production".into(), parent: None });
     let lab = v.new_id();
     v.groups.push(Group { id: lab, name: "Home lab".into(), parent: None });
-    let key = v.new_id();
-    v.keys.push(SshKey { id: key, label: "id_ed25519".into(), path: "~/.ssh/id_ed25519".into(), ..Default::default() });
+    // four real key files in a temporary folder, so the Keychain page can show what it reads from them
+    let kdir = std::env::temp_dir().join("sshtup-demo-keys");
+    let _ = std::fs::create_dir_all(&kdir);
+    let samples: [(&str, &str, &str, &str, u64, bool); 4] = [
+        ("personal-laptop", include_str!("../testdata/keys/ed_enc"), include_str!("../testdata/keys/ed_enc.pub"), "personal-laptop", 1_760_227_200, true),
+        ("deploy-github", include_str!("../testdata/keys/ed_plain"), include_str!("../testdata/keys/ed_plain.pub"), "deploy-github", 1_788_393_600, false),
+        ("legacy-nas", include_str!("../testdata/keys/rsa_pem"), include_str!("../testdata/keys/rsa_pem.pub"), "legacy-nas", 1_780_876_800, false),
+        ("backup-key", include_str!("../testdata/keys/rsa4096_enc"), include_str!("../testdata/keys/rsa4096_enc.pub"), "backup-key", 1_776_729_600, true),
+    ];
+    let mut key_ids = vec![];
+    for (label, private, public, file, added, generated) in samples {
+        let path = kdir.join(file);
+        let _ = std::fs::write(&path, private);
+        let id = v.new_id();
+        v.keys.push(SshKey { id, label: label.into(), path: path.to_string_lossy().into_owned(), public_key: public.trim().to_string(), added, generated, ..Default::default() });
+        key_ids.push(id);
+    }
+    let ident = v.new_id();
+    v.identities.push(Identity { id: ident, label: "Deploy user".into(), username: "deploy".into(), password: String::new(), key: Some(key_ids[1]) });
+    let ident2 = v.new_id();
+    v.identities.push(Identity { id: ident2, label: "Home lab admin".into(), username: "admin".into(), password: "x".into(), key: None });
     let items: [(&str, &str, &str, Option<u64>, &[&str]); 5] = [
         ("web-01", "203.0.113.10", "deploy", Some(prod), &["web"]),
         ("db-primary", "203.0.113.20", "postgres", Some(prod), &["db"]),
@@ -469,7 +494,7 @@ pub fn demo_vault() -> Vault {
             username: u.to_string(),
             tags: t.iter().map(|s| s.to_string()).collect(),
             last_used: 1000 - i as u64,
-            key: Some(key),
+            key: Some(key_ids[match i { 0..=2 => 0, 3 => 2, _ => 1 }]),
             ..Default::default()
         });
     }

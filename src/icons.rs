@@ -40,6 +40,7 @@ pub enum Icon {
     Eye,
     EyeOff,
     Alert,
+    Lock,
 }
 
 impl Icon {
