@@ -460,3 +460,16 @@ pub fn split_button(ui: &mut egui::Ui, icon: SplitIcon, tip: &str) -> egui::Resp
     }
     resp.on_hover_text(tip)
 }
+
+/// A row in a pop-up menu: an icon, then the text. `color` tints both (the text turns white on hover).
+pub fn icon_item(ui: &mut egui::Ui, icon: crate::icons::Icon, label: &str, color: Color32) -> egui::Response {
+    let w = 200.0;
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(w, 32.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, CARD_HOVER.gamma_multiply(1.0).lerp_to_gamma(Color32::WHITE, 0.08));
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    crate::icons::paint(ui.painter(), Pos2::new(r.left() + 18.0, r.center().y), 15.0, icon, color);
+    ui.painter().text(Pos2::new(r.left() + 38.0, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(13.5), color);
+    resp
+}

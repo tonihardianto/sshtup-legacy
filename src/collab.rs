@@ -95,17 +95,18 @@ pub enum CollabAct {
 pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>, can_share: bool) -> CollabAct {
     let mut act = CollabAct::None;
     ui.set_min_width(200.0);
+    ui.spacing_mut().item_spacing.y = 3.0;
     match shared {
         None if !can_share => label_muted(ui, "Shared with you; it cannot be shared again"),
         None => {
-            if ui.button("Share this terminal").clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Users, "Share this terminal", crate::ui::TEXT).clicked() {
                 act = CollabAct::Start;
                 ui.close();
             }
         }
         Some(s) => {
             label_muted(ui, &format!("Session code  {}", s.code()));
-            if ui.button("Copy session code").clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Copy, "Copy session code", crate::ui::TEXT).clicked() {
                 act = CollabAct::CopyCode;
                 ui.close();
             }
@@ -116,14 +117,14 @@ pub fn collab_items(ui: &mut egui::Ui, shared: Option<&Share>, can_share: bool) 
                     ui.close();
                 }
             }
-            if ui.button("Stop sharing").clicked() {
+            if crate::ui::icon_item(ui, crate::icons::Icon::Stop, "Stop sharing", crate::ui::RED).clicked() {
                 act = CollabAct::Stop;
                 ui.close();
             }
         }
     }
     ui.separator();
-    if ui.button("Open Collaboration").clicked() {
+    if crate::ui::icon_item(ui, crate::icons::Icon::Group, "Open Collaboration", crate::ui::TEXT).clicked() {
         act = CollabAct::OpenScreen;
         ui.close();
     }
