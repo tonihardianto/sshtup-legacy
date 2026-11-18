@@ -6,6 +6,7 @@ mod collab_net;
 mod fonts;
 mod hostcard;
 mod icons;
+mod keystore;
 mod lock;
 #[cfg(target_os = "macos")]
 mod macos_bar;
