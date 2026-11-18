@@ -98,6 +98,7 @@ pub fn start_host(
     pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
     shared: Arc<Shared>,
     ctx: egui::Context,
+    me: String,
 ) -> HostLink {
     let state = Arc::new(Mutex::new(LinkState { status: Status::Connecting, code: String::new(), guests: vec![], error: String::new() }));
     let inner = Arc::new(Inner { ctl: Mutex::new(None), stopped: AtomicBool::new(false) });
@@ -172,12 +173,12 @@ pub fn start_host(
                     let snap = parser.lock().map(|p| p.screen().contents_formatted()).unwrap_or_default();
                     let _ = otx.send(json!({"t":"snap","gid":gid,"d":seal(&key, Dir::Out, snap.as_bytes())}));
                     state.lock().unwrap().guests.push(GuestInfo { gid, name: text(&m, "name").to_string(), can_type: false });
-                    tell_roster(&state, &otx, &key);
+                    tell_roster(&state, &otx, &key, &me);
                 }
                 "left" => {
                     let gid = m.get("gid").and_then(|x| x.as_u64()).unwrap_or(0);
                     state.lock().unwrap().guests.retain(|g| g.gid != gid);
-                    tell_roster(&state, &otx, &key);
+                    tell_roster(&state, &otx, &key, &me);
                 }
                 "in" => {
                     // checked here as well as at the relay: a guest without permission is dropped,
@@ -217,8 +218,7 @@ pub fn start_host(
 }
 
 /// Tells the guests who is in the session (the host first), for the avatars on their tabs.
-fn tell_roster(state: &Mutex<LinkState>, otx: &std::sync::mpsc::Sender<Value>, key: &[u8; crate::wire::KEY_LEN]) {
-    let host = std::env::var("USER").unwrap_or_else(|_| "host".into());
+fn tell_roster(state: &Mutex<LinkState>, otx: &std::sync::mpsc::Sender<Value>, key: &[u8; crate::wire::KEY_LEN], host: &str) {
     let mut list = vec![json!({"n": host, "c": [0x20, 0x91, 0xF6]})];
     for g in state.lock().unwrap().guests.iter() {
         list.push(json!({"n": g.name, "c": guest_color(g.gid)}));
@@ -307,7 +307,7 @@ mod tests {
             typing: Mutex::new(None),
             people: Mutex::new(Vec::new()),
         });
-        let link = start_host(base.clone(), host_tok, parser, writer, shared.clone(), egui::Context::default());
+        let link = start_host(base.clone(), host_tok, parser, writer, shared.clone(), egui::Context::default(), "host".into());
         wait_for("the host to go live", || link.state.lock().unwrap().status != Status::Connecting);
         let st = link.state.lock().unwrap();
         assert_eq!(st.status, Status::Live, "{}", st.error);
@@ -337,8 +337,7 @@ mod tests {
         {
             use crate::typing_osc::{emit, Person, Report};
             let gid = link.state.lock().unwrap().guests.iter().find(|g| g.name == "ann").unwrap().gid;
-            let host = std::env::var("USER").unwrap_or_else(|_| "host".into());
-            let roster = emit("s3cret", &Report::People(vec![Person { name: host, color: [0x20, 0x91, 0xF6] }, Person { name: "ann".into(), color: guest_color(gid) }]));
+            let roster = emit("s3cret", &Report::People(vec![Person { name: "host".into(), color: [0x20, 0x91, 0xF6] }, Person { name: "ann".into(), color: guest_color(gid) }]));
             wait_for("the guest window to be told who is here", || seen.lock().unwrap().windows(roster.len()).any(|w| w == roster.as_slice()));
         }
         shared.tap.lock().unwrap().as_ref().unwrap().send(b"LIVE-OUTPUT".to_vec()).unwrap();

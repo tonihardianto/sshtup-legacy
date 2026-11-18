@@ -36,6 +36,10 @@ pub enum Icon {
     Pin,
     PinOff,
     Trash,
+    Download,
+    Eye,
+    EyeOff,
+    Alert,
 }
 
 impl Icon {

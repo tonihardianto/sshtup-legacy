@@ -182,6 +182,7 @@ pub struct App {
     /// Present when the vault is stored encrypted; used to save every change.
     pub vault_key: Option<crate::vaultcrypt::VaultKey>,
     pub sec: crate::lock::SecurityUi,
+    pub wel: crate::welcome::WelcomeUi,
     pub sync_rt: crate::sync::runtime::SyncRuntime,
 }
 
@@ -328,6 +329,7 @@ impl App {
             lock,
             vault_key: None,
             sec: Default::default(),
+            wel: Default::default(),
             sync_rt: Default::default(),
         };
         if app.demo && std::env::var("SSHTUP_DEMO_AC").is_ok() {
@@ -508,7 +510,7 @@ impl App {
 
     /// The people to draw as avatars on a tab: the host's own share, or, in a guest tab, whom the host told us about.
     pub fn people_of(&self, tab_id: u64) -> Vec<(String, Color32)> {
-        let mine = self.collab.people(tab_id);
+        let mine = self.collab.people(tab_id, self.my_name("you"));
         if !mine.is_empty() {
             return mine;
         }
@@ -1499,6 +1501,17 @@ impl eframe::App for App {
         }
 
         self.tab_bar(ui);
+        if self.needs_welcome() {
+            self.welcome_screen(ui);
+            self.remote_history_poll();
+            self.toasts(&ctx);
+            if self.dirty && !self.demo && self.lock.is_none() && !save_vault(&self.vault, self.vault_key.as_ref()) {
+                self.notify("Could not save your changes".into(), RED);
+            }
+            self.dirty = false;
+            self.handle_screenshot(&ctx);
+            return;
+        }
         match self.active {
             Some(id) => {
                 egui::CentralPanel::default().frame(Frame::new().fill(BG_CONTENT)).show(ui, |ui| self.terminal_area(ui, id));

@@ -14,6 +14,7 @@ mod lucide_data;
 mod model;
 mod relay_join;
 mod typing_osc;
+mod welcome;
 mod schemes;
 mod screens;
 mod settings_ui;
