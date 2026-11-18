@@ -418,3 +418,45 @@ pub fn avatar(painter: &egui::Painter, center: Pos2, radius: f32, name: &str, co
     let letter: String = name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into());
     painter.text(center, Align2::CENTER_CENTER, letter, FontId::proportional(radius * 1.15), Color32::from_rgb(20, 22, 30));
 }
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum SplitIcon {
+    Right,
+    Below,
+    Close,
+    Search,
+}
+
+/// A small square button in the tab strip: a window cut in two (or crossed out, to join the halves again).
+pub fn split_button(ui: &mut egui::Ui, icon: SplitIcon, tip: &str) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(r, 6.0, CARD_HOVER);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let col = if resp.hovered() { TEXT } else { MUTED };
+    let p = ui.painter();
+    let st = egui::Stroke::new(1.4, col);
+    let b = egui::Rect::from_center_size(r.center(), Vec2::new(14.0, 12.0));
+    match icon {
+        SplitIcon::Right => {
+            p.rect_stroke(b, 2.0, st, egui::StrokeKind::Inside);
+            p.line_segment([Pos2::new(b.center().x, b.top()), Pos2::new(b.center().x, b.bottom())], st);
+        }
+        SplitIcon::Below => {
+            p.rect_stroke(b, 2.0, st, egui::StrokeKind::Inside);
+            p.line_segment([Pos2::new(b.left(), b.center().y), Pos2::new(b.right(), b.center().y)], st);
+        }
+        SplitIcon::Search => {
+            let c = r.center() + Vec2::new(-1.5, -1.5);
+            p.circle_stroke(c, 5.0, st);
+            p.line_segment([c + Vec2::new(3.6, 3.6), c + Vec2::new(7.0, 7.0)], st);
+        }
+        SplitIcon::Close => {
+            let c = r.center();
+            p.line_segment([c + Vec2::new(-4.5, -4.5), c + Vec2::new(4.5, 4.5)], st);
+            p.line_segment([c + Vec2::new(-4.5, 4.5), c + Vec2::new(4.5, -4.5)], st);
+        }
+    }
+    resp.on_hover_text(tip)
+}
