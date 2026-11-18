@@ -192,6 +192,8 @@ enum SAct {
     Delete,
     ChangeHost,
     ToggleHidden,
+    /// A drag began on this row (it joins the selection unless it was already part of it).
+    DragStart(String),
     LeftLocal,
     /// Close the connection(s) and go back to the host list.
     Disconnect,
@@ -254,6 +256,8 @@ impl Transfer {
 
 #[derive(Default)]
 pub struct SftpState {
+    /// The pane a drag started in, while the pointer is held down on a file or folder.
+    drag: Option<Side>,
     transfers: Vec<Transfer>,
     transfers_collapsed: bool,
     next_transfer: u64,
@@ -1364,7 +1368,7 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
         let sid = if remote { "rows_remote" } else { "rows_local" };
         egui::ScrollArea::vertical().id_salt(sid).max_height(body_h).auto_shrink([false, false]).show_rows(ui, ROW_H, n, |ui, range| {
             for row in range {
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width().max(w), ROW_H), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width().max(w), ROW_H), Sense::click_and_drag());
                 let p = ui.painter();
                 let up_row = has_up && row == 0;
                 let ent = if up_row { None } else { Some(&pane.entries[view[row - has_up as usize]]) };
@@ -1406,6 +1410,11 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 }
                 if resp.double_clicked() {
                     dbl = Some(ent.map(|e| e.name.clone()));
+                }
+                if resp.drag_started() {
+                    if let Some(e) = ent {
+                        acts.push((side, SAct::DragStart(e.name.clone())));
+                    }
                 }
                 if resp.secondary_clicked() {
                     if let Some(e) = ent {
@@ -1665,6 +1674,33 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
     });
 }
 
+/// While files are being dragged: the pane they can be dropped on lights up, and a label follows the pointer.
+fn draw_drag_overlay(ctx: &egui::Context, from: Side, target: Rect, target_name: &str, names: &[String], pointer: Pos2) -> bool {
+    let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("sftp_dnd"));
+    let p = ctx.layer_painter(layer);
+    let over = target.contains(pointer);
+    ctx.set_cursor_icon(if over { egui::CursorIcon::Copy } else { egui::CursorIcon::Grabbing });
+    if over {
+        p.rect_filled(target, 0.0, Color32::from_rgba_unmultiplied(0x20, 0x91, 0xF6, 26));
+        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(2.0, BLUE), egui::StrokeKind::Inside);
+        let verb = if from == Side::Local { "Upload to" } else { "Download to" };
+        let g = p.layout_no_wrap(format!("{} {}", verb, target_name), FontId::proportional(14.0), Color32::WHITE);
+        let pill = Rect::from_center_size(target.center(), g.size() + Vec2::new(36.0, 20.0));
+        p.rect_filled(pill, pill.height() / 2.0, BLUE);
+        p.galley(Pos2::new(pill.center().x - g.size().x / 2.0, pill.center().y - g.size().y / 2.0), g, Color32::WHITE);
+    } else {
+        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(1.5, BLUE.linear_multiply(0.55)), egui::StrokeKind::Inside);
+    }
+    // what is being carried
+    let label = if names.len() == 1 { names[0].clone() } else { count(names.len(), "item") };
+    let g = p.layout_no_wrap(label, FontId::proportional(13.0), TEXT);
+    let r = Rect::from_min_size(pointer + Vec2::new(14.0, 14.0), g.size() + Vec2::new(24.0, 14.0));
+    p.rect_filled(r, 8.0, CARD_HOVER);
+    p.rect_stroke(r, 8.0, Stroke::new(1.0, BLUE), egui::StrokeKind::Inside);
+    p.galley(Pos2::new(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, TEXT);
+    over
+}
+
 fn selected_sorted(p: &Pane) -> Vec<String> {
     let mut v: Vec<String> = p.selected.iter().cloned().collect();
     v.sort();
@@ -1895,6 +1931,14 @@ impl App {
                     s.confirm_del = Some((side, names));
                 }
             }
+            SAct::DragStart(name) => {
+                let p = s.pane(side);
+                if !p.selected.contains(&name) {
+                    p.selected.clear();
+                    p.selected.insert(name);
+                }
+                s.drag = Some(side);
+            }
             SAct::ToggleHidden => {
                 let p = s.pane(side);
                 p.show_hidden = !p.show_hidden;
@@ -2028,6 +2072,9 @@ impl App {
                     p.selected.insert(if remote { "dump.sql" } else { "config.json" }.into());
                     self.sftp.local = p;
                 }
+            }
+            if std::env::var("SSHTUP_DEMO_DRAG").is_ok() {
+                self.sftp.drag = Some(Side::Local);
             }
             if let Ok(t) = std::env::var("SSHTUP_DEMO_TOAST") {
                 let col = match t.as_str() { "red" => RED, "amber" => AMBER, _ => GREEN };
@@ -2256,6 +2303,31 @@ impl App {
                         p.error = None;
                         self.sftp.navigate(side, path, Mode::Stay, &ctx);
                     }
+                }
+            }
+        }
+
+        // dragging files from one pane to the other
+        if let Some(from) = self.sftp.drag {
+            let (target, tname) = if from == Side::Local { (right, host.display_label()) } else { (left, lh.as_ref().map(|h| h.display_label()).unwrap_or_else(|| "Local".into())) };
+            let (mut pos, mut down, released, esc) = ctx.input(|i| (i.pointer.latest_pos(), i.pointer.any_down(), i.pointer.any_released(), i.key_pressed(egui::Key::Escape)));
+            if self.demo && std::env::var("SSHTUP_DEMO_DRAG").is_ok() {
+                // screenshot runs have no pointer: pretend the files are being held over the other pane
+                pos = Some(target.center() + Vec2::new(-60.0, -150.0));
+                down = true;
+            }
+            let names = selected_sorted(self.sftp.pane(from));
+            if esc || (!down && !released) || names.is_empty() {
+                self.sftp.drag = None;
+            } else if let Some(pos) = pos {
+                let over = draw_drag_overlay(&ctx, from, target, &tname, &names, pos);
+                if released {
+                    self.sftp.drag = None;
+                    if over {
+                        acts.push((from, SAct::Transfer));
+                    }
+                } else {
+                    ctx.request_repaint();
                 }
             }
         }
