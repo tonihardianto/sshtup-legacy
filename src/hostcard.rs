@@ -85,10 +85,10 @@ impl HostCardIn<'_> {
 fn icon_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, draw: impl FnOnce(&egui::Painter, Pos2, Color32)) -> egui::Response {
     let r = ui.interact(rect, id, Sense::click());
     if r.hovered() {
-        ui.painter().rect_filled(rect, 6.0, BORDER);
+        ui.painter().rect_filled(rect, 6.0, BORDER());
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    draw(ui.painter(), rect.center(), if r.hovered() { TEXT } else { MUTED });
+    draw(ui.painter(), rect.center(), if r.hovered() { TEXT() } else { MUTED() });
     r
 }
 
@@ -105,8 +105,8 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
     for (icon, text, a) in items {
         let clicked = if a == CardAct::Delete {
             // a soft red field marks the one item that destroys something
-            let r = ui.add(egui::Button::new(egui::RichText::new(format!("       {text}")).size(12.5).color(RED)).fill(RED.linear_multiply(0.14)).corner_radius(6).min_size(Vec2::new(0.0, 32.0)));
-            icons::paint(ui.painter(), Pos2::new(r.rect.left() + 20.0, r.rect.center().y), 14.0, icon, RED);
+            let r = ui.add(egui::Button::new(egui::RichText::new(format!("       {text}")).size(12.5).color(RED())).fill(RED().linear_multiply(0.14)).corner_radius(6).min_size(Vec2::new(0.0, 32.0)));
+            icons::paint(ui.painter(), Pos2::new(r.rect.left() + 20.0, r.rect.center().y), 14.0, icon, RED());
             r.clicked()
         } else {
             icon_text_button(ui, icon, text).clicked()
@@ -129,10 +129,10 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         act = CardAct::Open;
     }
     if c.live {
-        p.rect_stroke(rect, 10.0, Stroke::new(1.0, GREEN.linear_multiply(0.55)), StrokeKind::Inside);
+        p.rect_stroke(rect, 10.0, Stroke::new(1.0, GREEN().linear_multiply(0.55)), StrokeKind::Inside);
     }
     if out.resp.has_focus() {
-        p.rect_stroke(rect, 10.0, Stroke::new(1.5, BLUE), StrokeKind::Inside);
+        p.rect_stroke(rect, 10.0, Stroke::new(1.5, BLUE()), StrokeKind::Inside);
     }
 
     out.resp.context_menu(|ui| menu_items(ui, h, &mut act));
@@ -142,8 +142,8 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
     p.rect_filled(av, 8.0, c.color.linear_multiply(0.9));
     p.text(av.center(), Align2::CENTER_CENTER, avatar_text(&h.label, &h.address), FontId::proportional(15.0), Color32::WHITE);
     if c.live {
-        p.circle_filled(Pos2::new(av.right() - 1.0, av.bottom() - 1.0), 6.5, CARD);
-        status_dot(&p, Pos2::new(av.right() - 1.0, av.bottom() - 1.0), GREEN);
+        p.circle_filled(Pos2::new(av.right() - 1.0, av.bottom() - 1.0), 6.5, CARD());
+        status_dot(&p, Pos2::new(av.right() - 1.0, av.bottom() - 1.0), GREEN());
     }
 
     // actions, only while the card is being pointed at or focused (or its menu is open)
@@ -183,13 +183,13 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
     let tx = av.right() + 12.0;
     let title_w = (right_edge - tx - 4.0).max(20.0);
     let tp = p.with_clip_rect(Rect::from_min_max(Pos2::new(tx, rect.top()), Pos2::new(tx + title_w, rect.bottom())));
-    tp.text(Pos2::new(tx, rect.top() + 22.0), Align2::LEFT_CENTER, h.display_label(), FontId::proportional(14.5), TEXT);
+    tp.text(Pos2::new(tx, rect.top() + 22.0), Align2::LEFT_CENTER, h.display_label(), FontId::proportional(14.5), TEXT());
     let mono = FontId::monospace(11.5);
-    let char_w = p.layout_no_wrap("0".into(), mono.clone(), MUTED).size().x.max(1.0);
+    let char_w = p.layout_no_wrap("0".into(), mono.clone(), MUTED()).size().x.max(1.0);
     let sub_w = rect.right() - 12.0 - tx;
     let addr_port = format!("{}:{}", h.address, h.effective_port());
     let sub = elide_sub(&c.user, &addr_port, (sub_w / char_w).floor() as usize);
-    p.text(Pos2::new(tx, rect.top() + 42.0), Align2::LEFT_CENTER, &sub, mono, MUTED);
+    p.text(Pos2::new(tx, rect.top() + 42.0), Align2::LEFT_CENTER, &sub, mono, MUTED());
     if sub.contains('…') {
         let full = if c.user.is_empty() { addr_port.clone() } else { format!("{}@{}", c.user, addr_port) };
         ui.interact(Rect::from_min_size(Pos2::new(tx, rect.top() + 34.0), Vec2::new(sub_w, 16.0)), out.resp.id.with("sub"), Sense::hover()).on_hover_text(full);
@@ -199,14 +199,14 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
     let mut x = rect.left() + 12.0;
     let y = rect.top() + 12.0 + 40.0 + 10.0 + 11.0;
     for (text, good) in c.chips() {
-        let g = p.layout_no_wrap(text, FontId::proportional(11.5), if good { GREEN } else { MUTED });
+        let g = p.layout_no_wrap(text, FontId::proportional(11.5), if good { GREEN() } else { MUTED() });
         let w = g.size().x + 16.0;
         if x + w > rect.right() - 12.0 {
             break;
         }
         let r = Rect::from_min_size(Pos2::new(x, y - 11.0), Vec2::new(w, 22.0));
-        p.rect_filled(r, 11.0, if good { GREEN.linear_multiply(0.18) } else { Color32::from_white_alpha(16) });
-        p.galley(Pos2::new(r.left() + 8.0, r.center().y - g.size().y / 2.0), g, TEXT);
+        p.rect_filled(r, 11.0, if good { GREEN().linear_multiply(0.18) } else { wash(16) });
+        p.galley(Pos2::new(r.left() + 8.0, r.center().y - g.size().y / 2.0), g, TEXT());
         x += w + 6.0;
     }
     act

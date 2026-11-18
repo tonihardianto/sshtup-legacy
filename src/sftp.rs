@@ -16,14 +16,29 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-const HDR: Color32 = Color32::from_rgb(0x27, 0x2A, 0x3C);
-const COLHDR: Color32 = Color32::from_rgb(0x22, 0x25, 0x37);
-const BODY: Color32 = Color32::from_rgb(0x1B, 0x1E, 0x30);
-const HOVER_ROW: Color32 = Color32::from_rgb(0x23, 0x27, 0x3B);
+#[allow(non_snake_case)]
+fn HDR() -> Color32 {
+    pick(0x272A3C, 0xE9ECF2)
+}
+#[allow(non_snake_case)]
+fn COLHDR() -> Color32 {
+    pick(0x222537, 0xEFF1F6)
+}
+#[allow(non_snake_case)]
+fn BODY() -> Color32 {
+    pick(0x1B1E30, 0xFAFBFD)
+}
+#[allow(non_snake_case)]
+fn HOVER_ROW() -> Color32 {
+    pick(0x23273B, 0xEEF0F6)
+}
 const ROW_H: f32 = 40.0;
 const BAR_H: f32 = 44.0;
 /// Secondary text in the rows (dates, sizes, permissions): a little brighter than MUTED so it stays readable.
-const META: Color32 = Color32::from_rgb(0xA4, 0xA8, 0xBC);
+#[allow(non_snake_case)]
+fn META() -> Color32 {
+    pick(0xA4A8BC, 0x777C92)
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
@@ -1030,10 +1045,10 @@ fn demo_entries(remote: bool) -> Vec<Entry> {
 fn icon_btn(ui: &mut egui::Ui, icon: Icon, enabled: bool, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
     if enabled && resp.hovered() {
-        ui.painter().rect_filled(rect, 6.0, CARD_HOVER);
+        ui.painter().rect_filled(rect, 6.0, CARD_HOVER());
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    paint(ui.painter(), rect.center(), 15.0, icon, if enabled { TEXT } else { MUTED.linear_multiply(0.45) });
+    paint(ui.painter(), rect.center(), 15.0, icon, if enabled { TEXT() } else { MUTED().linear_multiply(0.45) });
     resp.on_hover_text(tip)
 }
 
@@ -1099,34 +1114,34 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
     ui.scope_builder(builder, |ui| {
         ui.set_clip_rect(rect.intersect(ui.clip_rect()));
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        ui.painter().rect_filled(rect, 0.0, BODY);
+        ui.painter().rect_filled(rect, 0.0, BODY());
         let w = rect.width();
 
         // ---- header
-        let hr = section(ui, w, 46.0, HDR);
+        let hr = section(ui, w, 46.0, HDR());
         let hb = egui::UiBuilder::new().max_rect(hr.shrink2(Vec2::new(14.0, 0.0))).layout(Layout::left_to_right(Align::Center));
         ui.scope_builder(hb, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 0.0);
             let (r, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
             badge(ui.painter(), r, badge_text, badge_color);
-            ui.add(egui::Label::new(RichText::new(title).size(14.5).strong().color(TEXT)).truncate());
+            ui.add(egui::Label::new(RichText::new(title).size(14.5).strong().color(TEXT())).truncate());
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (ar, aresp) = ui.allocate_exact_size(Vec2::new(90.0, 28.0), Sense::click());
                 let menu_open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&aresp));
                 if aresp.hovered() || menu_open {
-                    ui.painter().rect_filled(ar, 6.0, CARD_HOVER);
+                    ui.painter().rect_filled(ar, 6.0, CARD_HOVER());
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                paint(ui.painter(), Pos2::new(ar.left() + 14.0, ar.center().y), 14.0, Icon::List, TEXT);
-                ui.painter().text(Pos2::new(ar.left() + 28.0, ar.center().y), Align2::LEFT_CENTER, "Actions", FontId::proportional(13.0), TEXT);
+                paint(ui.painter(), Pos2::new(ar.left() + 14.0, ar.center().y), 14.0, Icon::List, TEXT());
+                ui.painter().text(Pos2::new(ar.left() + 28.0, ar.center().y), Align2::LEFT_CENTER, "Actions", FontId::proportional(13.0), TEXT());
                 let show_hidden_now = pane.show_hidden;
                 egui::Popup::menu(&aresp).show(|ui| menu_items(ui, side, lhost, show_hidden_now, acts));
                 let (fr, fresp) = ui.allocate_exact_size(Vec2::new(66.0, 28.0), Sense::click());
                 if fresp.hovered() {
-                    ui.painter().rect_filled(fr, 6.0, CARD_HOVER);
+                    ui.painter().rect_filled(fr, 6.0, CARD_HOVER());
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                let col = if pane.show_filter { BLUE } else { TEXT };
+                let col = if pane.show_filter { BLUE() } else { TEXT() };
                 paint(ui.painter(), Pos2::new(fr.left() + 13.0, fr.center().y), 14.0, Icon::Search, col);
                 ui.painter().text(Pos2::new(fr.left() + 26.0, fr.center().y), Align2::LEFT_CENTER, "Filter", FontId::proportional(13.0), col);
                 if fresp.clicked() {
@@ -1137,14 +1152,14 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 }
                 if let Some(b) = busy {
                     if remote || side == Side::Local {
-                        ui.label(RichText::new(b).size(12.0).color(AMBER));
+                        ui.label(RichText::new(b).size(12.0).color(AMBER()));
                     }
                 }
             });
         });
 
         // ---- breadcrumb
-        let br = section(ui, w, 38.0, BODY);
+        let br = section(ui, w, 38.0, BODY());
         let bb = egui::UiBuilder::new().max_rect(br.shrink2(Vec2::new(10.0, 0.0))).layout(Layout::left_to_right(Align::Center));
         ui.scope_builder(bb, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
@@ -1269,8 +1284,8 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                     let mut rows: Vec<(Rect, String)> = Vec::new();
                     egui::Area::new(egui::Id::new(("sftp_path_ac", remote))).order(egui::Order::Foreground).fixed_pos(pos).show(&ctx, |ui| {
                         egui::Frame::new()
-                            .fill(Color32::from_rgb(0x25, 0x28, 0x3C))
-                            .stroke(Stroke::new(1.0, BORDER))
+                            .fill(pick(0x25283C, 0xE9ECF3))
+                            .stroke(Stroke::new(1.0, BORDER()))
                             .corner_radius(8)
                             .inner_margin(4)
                             .show(ui, |ui| {
@@ -1278,20 +1293,20 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                                 ui.set_width(lw - 10.0);
                                 if shown.is_empty() {
                                     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::hover());
-                                    ui.painter().text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "Reading folders…", FontId::proportional(12.5), MUTED);
+                                    ui.painter().text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "Reading folders…", FontId::proportional(12.5), MUTED());
                                 }
                                 for (i, name) in shown.iter().enumerate() {
                                     let (r, rr) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.0), Sense::click());
                                     if sel == Some(i) {
-                                        ui.painter().rect_filled(r, 5.0, Color32::from_rgb(0x2E, 0x3A, 0x5C));
+                                        ui.painter().rect_filled(r, 5.0, pick(0x2E3A5C, 0xD5E3F7));
                                     } else if rr.hovered() {
-                                        ui.painter().rect_filled(r, 5.0, CARD_HOVER);
+                                        ui.painter().rect_filled(r, 5.0, CARD_HOVER());
                                     }
                                     if rr.hovered() {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
-                                    paint(ui.painter(), Pos2::new(r.left() + 16.0, r.center().y), 14.0, Icon::Folder, MUTED);
-                                    ui.painter().text(Pos2::new(r.left() + 32.0, r.center().y), Align2::LEFT_CENTER, name, FontId::proportional(12.5), TEXT);
+                                    paint(ui.painter(), Pos2::new(r.left() + 16.0, r.center().y), 14.0, Icon::Folder, MUTED());
+                                    ui.painter().text(Pos2::new(r.left() + 32.0, r.center().y), Align2::LEFT_CENTER, name, FontId::proportional(12.5), TEXT());
                                     rows.push((r, format!("{}{}/", dir_part, name)));
                                 }
                             });
@@ -1312,17 +1327,17 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
             }
             let skip = crumbs.len().saturating_sub(4);
             if skip > 0 {
-                ui.label(RichText::new("…").color(MUTED));
+                ui.label(RichText::new("…").color(MUTED()));
             }
             for (i, (label, full)) in crumbs.iter().enumerate().skip(skip) {
                 if i > skip {
                     let (r, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-                    paint(ui.painter(), r.center(), 9.0, Icon::ChevRight, MUTED);
+                    paint(ui.painter(), r.center(), 9.0, Icon::ChevRight, MUTED());
                 }
                 let (r, _) = ui.allocate_exact_size(Vec2::splat(15.0), Sense::hover());
-                paint(ui.painter(), r.center(), 14.0, Icon::Folder, MUTED);
+                paint(ui.painter(), r.center(), 14.0, Icon::Folder, MUTED());
                 let last = i + 1 == crumbs.len();
-                let resp = ui.add(egui::Label::new(RichText::new(label).size(12.5).color(if last { TEXT } else { MUTED })).sense(Sense::click()));
+                let resp = ui.add(egui::Label::new(RichText::new(label).size(12.5).color(if last { TEXT() } else { MUTED() })).sense(Sense::click()));
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
@@ -1335,7 +1350,7 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 let (r, resp) = ui.allocate_exact_size(Vec2::new(rest, 28.0), Sense::click());
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
-                    ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, BORDER), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(r, 6.0, Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
                 }
                 if resp.clicked() {
                     start_edit = true;
@@ -1352,7 +1367,7 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
 
         // ---- filter row
         if pane.show_filter {
-            let fr = section(ui, w, 38.0, BODY);
+            let fr = section(ui, w, 38.0, BODY());
             let fb = egui::UiBuilder::new().max_rect(fr.shrink2(Vec2::new(12.0, 4.0))).layout(Layout::left_to_right(Align::Center));
             ui.scope_builder(fb, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut pane.filter).hint_text("Filter by name").desired_width(w - 24.0).margin(Vec2::new(10.0, 6.0)));
@@ -1360,7 +1375,7 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
         }
 
         // ---- column header
-        let cr = section(ui, w, 30.0, COLHDR);
+        let cr = section(ui, w, 30.0, COLHDR());
         let kind_x = cr.right() - 62.0;
         let size_x = kind_x - 74.0;
         let date_x = size_x - 142.0;
@@ -1372,12 +1387,12 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
             let active = pane.sort_col as usize == i;
-            let col = if active { TEXT } else { MUTED };
+            let col = if active { TEXT() } else { MUTED() };
             let galley = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.0), col);
             let gw = galley.size().x;
             ui.painter().galley(Pos2::new(*x0, cr.center().y - galley.size().y / 2.0), galley, col);
             if active {
-                paint(ui.painter(), Pos2::new(*x0 + gw + 10.0, cr.center().y), 9.0, if pane.sort_desc { Icon::ChevDown } else { Icon::ChevUp }, TEXT);
+                paint(ui.painter(), Pos2::new(*x0 + gw + 10.0, cr.center().y), 9.0, if pane.sort_desc { Icon::ChevDown } else { Icon::ChevUp }, TEXT());
             }
             if resp.clicked() {
                 acts.push((side, SAct::Sort(i as u8)));
@@ -1398,15 +1413,15 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
         let body_h = (rect.bottom() - ui.cursor().top()).max(10.0);
 
         if let Some(e) = pane.error.clone() {
-            let er = section(ui, w, 34.0, Color32::from_rgb(0x3A, 0x1F, 0x2A));
-            ui.painter().with_clip_rect(er).text(Pos2::new(er.left() + 14.0, er.center().y), Align2::LEFT_CENTER, e, FontId::proportional(12.0), Color32::from_rgb(0xFF, 0xB4, 0xB4));
+            let er = section(ui, w, 34.0, pick(0x3A1F2A, 0xFBE4E6));
+            ui.painter().with_clip_rect(er).text(Pos2::new(er.left() + 14.0, er.center().y), Align2::LEFT_CENTER, e, FontId::proportional(12.0), pick(0xFFB4B4, 0xB02A2E));
         }
         if pane.loading && pane.entries.is_empty() {
-            let lr = section(ui, w, 60.0, BODY);
-            ui.painter().text(lr.center(), Align2::CENTER_CENTER, "Loading…", FontId::proportional(13.0), MUTED);
+            let lr = section(ui, w, 60.0, BODY());
+            ui.painter().text(lr.center(), Align2::CENTER_CENTER, "Loading…", FontId::proportional(13.0), MUTED());
         } else if n == 0 && pane.error.is_none() {
-            let lr = section(ui, w, 60.0, BODY);
-            ui.painter().text(lr.center(), Align2::CENTER_CENTER, "This folder is empty", FontId::proportional(13.0), MUTED);
+            let lr = section(ui, w, 60.0, BODY());
+            ui.painter().text(lr.center(), Align2::CENTER_CENTER, "This folder is empty", FontId::proportional(13.0), MUTED());
         }
 
         let sid = if remote { "rows_remote" } else { "rows_local" };
@@ -1420,31 +1435,31 @@ fn draw_pane(ui: &mut egui::Ui, rect: Rect, side: Side, lhost: bool, cfg: &Optio
                 if selected {
                     p.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0x20, 0x91, 0xF6, 56));
                 } else if resp.hovered() {
-                    p.rect_filled(rect, 0.0, HOVER_ROW);
+                    p.rect_filled(rect, 0.0, HOVER_ROW());
                 }
                 let cy = rect.center().y;
                 let ic = Pos2::new(rect.left() + 26.0, cy);
                 match ent {
-                    Some(e) if !e.is_dir => paint(p, ic, 18.0, Icon::File, MUTED),
-                    _ => paint(p, ic, 20.0, Icon::FolderFill, BLUE),
+                    Some(e) if !e.is_dir => paint(p, ic, 18.0, Icon::File, MUTED()),
+                    _ => paint(p, ic, 20.0, Icon::FolderFill, BLUE()),
                 }
                 let name_clip = Rect::from_min_max(Pos2::new(rect.left() + 42.0, rect.top()), Pos2::new(date_x - 8.0, rect.bottom()));
                 let pc = p.with_clip_rect(name_clip);
                 match ent {
                     None => {
-                        pc.text(Pos2::new(rect.left() + 44.0, cy), Align2::LEFT_CENTER, "..", FontId::proportional(13.5), TEXT);
+                        pc.text(Pos2::new(rect.left() + 44.0, cy), Align2::LEFT_CENTER, "..", FontId::proportional(13.5), TEXT());
                     }
                     Some(e) => {
-                        pc.text(Pos2::new(rect.left() + 44.0, cy - 7.0), Align2::LEFT_CENTER, &e.name, FontId::proportional(13.5), TEXT);
-                        pc.text(Pos2::new(rect.left() + 44.0, cy + 9.0), Align2::LEFT_CENTER, &e.perms, FontId::monospace(10.5), META);
+                        pc.text(Pos2::new(rect.left() + 44.0, cy - 7.0), Align2::LEFT_CENTER, &e.name, FontId::proportional(13.5), TEXT());
+                        pc.text(Pos2::new(rect.left() + 44.0, cy + 9.0), Align2::LEFT_CENTER, &e.perms, FontId::monospace(10.5), META());
                         let date = match e.mtime {
                             Some(t) => fmt_us(t, tz),
                             None => e.mtime_text.clone(),
                         };
-                        p.with_clip_rect(Rect::from_min_max(Pos2::new(date_x, rect.top()), Pos2::new(size_x - 4.0, rect.bottom()))).text(Pos2::new(date_x, cy), Align2::LEFT_CENTER, date, FontId::proportional(12.0), META);
+                        p.with_clip_rect(Rect::from_min_max(Pos2::new(date_x, rect.top()), Pos2::new(size_x - 4.0, rect.bottom()))).text(Pos2::new(date_x, cy), Align2::LEFT_CENTER, date, FontId::proportional(12.0), META());
                         let sz = if e.is_dir { "—".to_string() } else { fmt_sz(e.size) };
-                        p.text(Pos2::new(size_x, cy), Align2::LEFT_CENTER, sz, FontId::proportional(12.0), META);
-                        p.with_clip_rect(Rect::from_min_max(Pos2::new(kind_x, rect.top()), rect.right_bottom())).text(Pos2::new(kind_x, cy), Align2::LEFT_CENTER, &e.kind, FontId::proportional(12.0), META);
+                        p.text(Pos2::new(size_x, cy), Align2::LEFT_CENTER, sz, FontId::proportional(12.0), META());
+                        p.with_clip_rect(Rect::from_min_max(Pos2::new(kind_x, rect.top()), rect.right_bottom())).text(Pos2::new(kind_x, cy), Align2::LEFT_CENTER, &e.kind, FontId::proportional(12.0), META());
                     }
                 }
                 if resp.clicked() {
@@ -1552,9 +1567,9 @@ fn pane_status(p: &Pane) -> (String, bool) {
 
 /// One bar under both panes: each pane's item count and selection, and the Transfers switch on the right.
 fn draw_status_bar(ui: &mut egui::Ui, rect: Rect, split_x: f32, left: (String, bool), right: (String, bool), s: &mut SftpState) {
-    ui.painter().rect_filled(rect, 0.0, COLHDR);
-    ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, BORDER));
-    ui.painter().line_segment([Pos2::new(split_x, rect.top()), Pos2::new(split_x, rect.bottom())], Stroke::new(1.0, BORDER));
+    ui.painter().rect_filled(rect, 0.0, COLHDR());
+    ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, BORDER()));
+    ui.painter().line_segment([Pos2::new(split_x, rect.top()), Pos2::new(split_x, rect.bottom())], Stroke::new(1.0, BORDER()));
     let cy = rect.center().y;
     let active = s.transfers.iter().filter(|t| t.running()).count();
     let finished = s.transfers.len() - active;
@@ -1562,21 +1577,21 @@ fn draw_status_bar(ui: &mut egui::Ui, rect: Rect, split_x: f32, left: (String, b
     // right edge: Transfers switch, and "Clear completed" when something has finished
     let mut x = rect.right() - 10.0;
     let mut btn = |ui: &mut egui::Ui, label: &str, badge: Option<String>, accent: bool, tip: &str, x: &mut f32| -> bool {
-        let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.5), if accent { TEXT } else { META });
-        let bg = badge.map(|b| ui.painter().layout_no_wrap(b, FontId::proportional(11.5), Color32::from_rgb(0x9C, 0xC9, 0xFF)));
+        let g = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.5), if accent { TEXT() } else { META() });
+        let bg = badge.map(|b| ui.painter().layout_no_wrap(b, FontId::proportional(11.5), pick(0x9CC9FF, 0x1B6FC9)));
         let bw = bg.as_ref().map_or(0.0, |b| b.size().x + 16.0 + 8.0);
         let w = g.size().x + bw + 20.0;
         let r = Rect::from_min_size(Pos2::new(*x - w, cy - 14.0), Vec2::new(w, 28.0));
         let resp = ui.interact(r, ui.id().with(("bar_btn", label)), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(r, 6.0, CARD_HOVER);
+            ui.painter().rect_filled(r, 6.0, CARD_HOVER());
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        ui.painter().galley(Pos2::new(r.left() + 10.0, cy - g.size().y / 2.0), g.clone(), TEXT);
+        ui.painter().galley(Pos2::new(r.left() + 10.0, cy - g.size().y / 2.0), g.clone(), TEXT());
         if let Some(b) = bg {
             let br = Rect::from_min_size(Pos2::new(r.left() + 10.0 + g.size().x + 8.0, cy - 10.0), Vec2::new(b.size().x + 16.0, 20.0));
             ui.painter().rect_filled(br, 10.0, Color32::from_rgba_unmultiplied(0x20, 0x91, 0xF6, 50));
-            ui.painter().galley(Pos2::new(br.left() + 8.0, cy - b.size().y / 2.0), b, TEXT);
+            ui.painter().galley(Pos2::new(br.left() + 8.0, cy - b.size().y / 2.0), b, TEXT());
         }
         *x = r.left() - 4.0;
         resp.on_hover_text(tip).clicked()
@@ -1593,7 +1608,7 @@ fn draw_status_bar(ui: &mut egui::Ui, rect: Rect, split_x: f32, left: (String, b
     let controls_left = x;
 
     for (info, x0, x1) in [(left, rect.left() + 16.0, split_x - 12.0), (right, split_x + 16.0, controls_left - 8.0)] {
-        let col = if info.1 { TEXT } else { META };
+        let col = if info.1 { TEXT() } else { META() };
         let g = fit_text(ui.painter(), &info.0, FontId::proportional(12.5), col, (x1 - x0).max(20.0));
         ui.painter().galley(Pos2::new(x0, cy - g.size().y / 2.0), g, col);
     }
@@ -1605,8 +1620,8 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
     ui.scope_builder(builder, |ui| {
         ui.set_clip_rect(rect.intersect(ui.clip_rect()));
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        ui.painter().rect_filled(rect, 0.0, BODY);
-        ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, BORDER));
+        ui.painter().rect_filled(rect, 0.0, BODY());
+        ui.painter().line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, BORDER()));
 
         // rows, newest first
         let mut remove: Option<u64> = None;
@@ -1616,7 +1631,7 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
             for t in s.transfers.iter().rev() {
                 let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), PANEL_ROW), Sense::hover());
                 if resp.hovered() {
-                    ui.painter().rect_filled(r, 0.0, HOVER_ROW);
+                    ui.painter().rect_filled(r, 0.0, HOVER_ROW());
                 }
                 let cy = r.center().y;
                 let state_w = 86.0;
@@ -1643,31 +1658,31 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                     (Some((_, Ok(()))), None) => fmt_dur(el),
                     (Some((_, Err(_))), _) => format!("stopped after {}", fmt_dur(el)),
                 };
-                let ig = p.layout_no_wrap(info, FontId::proportional(12.0), META);
+                let ig = p.layout_no_wrap(info, FontId::proportional(12.0), META());
                 let iw = ig.size().x;
                 let name_w = (info_right - iw - 20.0 - (r.left() + 16.0)).max(120.0);
                 if info_right - iw > r.left() + 16.0 + 120.0 + 12.0 {
-                    p.galley(Pos2::new(info_right - iw, cy - ig.size().y / 2.0), ig, META);
+                    p.galley(Pos2::new(info_right - iw, cy - ig.size().y / 2.0), ig, META());
                 }
 
                 // name and route
-                let tg = fit_text(p, &t.title, FontId::proportional(13.5), TEXT, name_w);
-                p.galley(Pos2::new(r.left() + 16.0, cy - 9.0 - tg.size().y / 2.0), tg, TEXT);
-                let rg = fit_text(p, &t.route, FontId::proportional(11.5), META, name_w);
-                p.galley(Pos2::new(r.left() + 16.0, cy + 9.0 - rg.size().y / 2.0), rg, META);
+                let tg = fit_text(p, &t.title, FontId::proportional(13.5), TEXT(), name_w);
+                p.galley(Pos2::new(r.left() + 16.0, cy - 9.0 - tg.size().y / 2.0), tg, TEXT());
+                let rg = fit_text(p, &t.route, FontId::proportional(11.5), META(), name_w);
+                p.galley(Pos2::new(r.left() + 16.0, cy + 9.0 - rg.size().y / 2.0), rg, META());
 
                 // bar
-                p.rect_filled(bar_r, 3.0, Color32::from_rgb(0x2A, 0x2E, 0x44));
+                p.rect_filled(bar_r, 3.0, pick(0x2A2E44, 0xDCE0EA));
                 let (frac, col, state) = match &t.end {
                     None => match (t.total, t.measured()) {
                         (Some(total), true) if total > 0 => {
                             let f = (t.done_bytes as f32 / total as f32).clamp(0.0, 1.0);
-                            (Some(f), BLUE, format!("{}%", (f * 100.0).floor() as u32))
+                            (Some(f), BLUE(), format!("{}%", (f * 100.0).floor() as u32))
                         }
-                        _ => (None, BLUE, "Working…".to_string()),
+                        _ => (None, BLUE(), "Working…".to_string()),
                     },
-                    Some((_, Ok(()))) => (Some(1.0), GREEN, "Done".to_string()),
-                    Some((_, Err(_))) => (Some(1.0), RED, "Failed".to_string()),
+                    Some((_, Ok(()))) => (Some(1.0), GREEN(), "Done".to_string()),
+                    Some((_, Err(_))) => (Some(1.0), RED(), "Failed".to_string()),
                 };
                 match frac {
                     Some(f) => {
@@ -1684,9 +1699,9 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                     }
                 }
                 let scol = match &t.end {
-                    None => TEXT,
-                    Some((_, Ok(()))) => GREEN,
-                    Some((_, Err(_))) => RED,
+                    None => TEXT(),
+                    Some((_, Ok(()))) => GREEN(),
+                    Some((_, Err(_))) => RED(),
                 };
                 let state_x = bar_r.right() + 14.0;
                 p.text(Pos2::new(state_x, cy), Align2::LEFT_CENTER, state, FontId::proportional(12.5), scol);
@@ -1694,14 +1709,14 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                 // a finished row can be dismissed
                 let xr = Rect::from_center_size(Pos2::new(r.right() - 16.0 - 11.0, cy), Vec2::splat(24.0));
                 if t.running() {
-                    ui.painter().text(xr.center(), Align2::CENTER_CENTER, "···", FontId::proportional(13.0), META);
+                    ui.painter().text(xr.center(), Align2::CENTER_CENTER, "···", FontId::proportional(13.0), META());
                 } else {
                     let xresp = ui.interact(xr, ui.id().with(("tr_x", t.id)), Sense::click());
                     if xresp.hovered() {
-                        ui.painter().rect_filled(xr, 6.0, CARD_HOVER);
+                        ui.painter().rect_filled(xr, 6.0, CARD_HOVER());
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
-                    paint(ui.painter(), xr.center(), 13.0, Icon::Close, if xresp.hovered() { TEXT } else { META });
+                    paint(ui.painter(), xr.center(), 13.0, Icon::Close, if xresp.hovered() { TEXT() } else { META() });
                     if xresp.on_hover_text("Remove from the list").clicked() {
                         remove = Some(t.id);
                     }
@@ -1709,7 +1724,7 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                 if let Some((_, Err(e))) = &t.end {
                     ui.interact(Rect::from_min_max(Pos2::new(state_x - 4.0, r.top()), Pos2::new(state_x + state_w, r.bottom())), ui.id().with(("tr_err", t.id)), Sense::hover()).on_hover_text(e.clone());
                 }
-                ui.painter().line_segment([Pos2::new(r.left() + 16.0, r.bottom()), Pos2::new(r.right() - 16.0, r.bottom())], Stroke::new(1.0, Color32::from_rgb(0x25, 0x28, 0x3B)));
+                ui.painter().line_segment([Pos2::new(r.left() + 16.0, r.bottom()), Pos2::new(r.right() - 16.0, r.bottom())], Stroke::new(1.0, pick(0x25283B, 0xE4E7EE)));
             }
         });
         if let Some(id) = remove {
@@ -1726,22 +1741,22 @@ fn draw_drag_overlay(ctx: &egui::Context, from: Side, target: Rect, target_name:
     ctx.set_cursor_icon(if over { egui::CursorIcon::Copy } else { egui::CursorIcon::Grabbing });
     if over {
         p.rect_filled(target, 0.0, Color32::from_rgba_unmultiplied(0x20, 0x91, 0xF6, 26));
-        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(2.0, BLUE), egui::StrokeKind::Inside);
+        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(2.0, BLUE()), egui::StrokeKind::Inside);
         let verb = if from == Side::Local { "Upload to" } else { "Download to" };
         let g = p.layout_no_wrap(format!("{} {}", verb, target_name), FontId::proportional(14.0), Color32::WHITE);
         let pill = Rect::from_center_size(target.center(), g.size() + Vec2::new(36.0, 20.0));
-        p.rect_filled(pill, pill.height() / 2.0, BLUE);
+        p.rect_filled(pill, pill.height() / 2.0, BLUE());
         p.galley(Pos2::new(pill.center().x - g.size().x / 2.0, pill.center().y - g.size().y / 2.0), g, Color32::WHITE);
     } else {
-        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(1.5, BLUE.linear_multiply(0.55)), egui::StrokeKind::Inside);
+        p.rect_stroke(target.shrink(2.0), 6.0, Stroke::new(1.5, BLUE().linear_multiply(0.55)), egui::StrokeKind::Inside);
     }
     // what is being carried
     let label = if names.len() == 1 { names[0].clone() } else { count(names.len(), "item") };
-    let g = p.layout_no_wrap(label, FontId::proportional(13.0), TEXT);
+    let g = p.layout_no_wrap(label, FontId::proportional(13.0), TEXT());
     let r = Rect::from_min_size(pointer + Vec2::new(14.0, 14.0), g.size() + Vec2::new(24.0, 14.0));
-    p.rect_filled(r, 8.0, CARD_HOVER);
-    p.rect_stroke(r, 8.0, Stroke::new(1.0, BLUE), egui::StrokeKind::Inside);
-    p.galley(Pos2::new(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, TEXT);
+    p.rect_filled(r, 8.0, CARD_HOVER());
+    p.rect_stroke(r, 8.0, Stroke::new(1.0, BLUE()), egui::StrokeKind::Inside);
+    p.galley(Pos2::new(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, TEXT());
     over
 }
 
@@ -1818,7 +1833,7 @@ impl App {
     pub(crate) fn sftp_open(&mut self, h: &Host, ctx: &egui::Context) {
         crate::model::tighten_known_hosts();
         if let Some(why) = self.connection_problem(h) {
-            self.notify(why, RED);
+            self.notify(why, RED());
             return;
         }
         let cfg = Arc::new(self.sftp_cfg(h));
@@ -1831,7 +1846,7 @@ impl App {
 
     fn sftp_left_open(&mut self, h: &Host, ctx: &egui::Context) {
         if let Some(why) = self.connection_problem(h) {
-            self.notify(why, RED);
+            self.notify(why, RED());
             return;
         }
         let cfg = Arc::new(self.sftp_cfg(h));
@@ -1853,7 +1868,7 @@ impl App {
         let mut close = false;
         let (_, closed) = app_modal(ctx, "left_pane_modal", "Left pane", |ui| {
             ui.set_width(340.0);
-            ui.label(RichText::new("Show another host on the left to move files from host to host.").size(12.5).color(MUTED));
+            ui.label(RichText::new("Show another host on the left to move files from host to host.").size(12.5).color(MUTED()));
             ui.add_space(8.0);
             if flat_button(ui, "This computer").clicked() {
                 local = true;
@@ -1867,7 +1882,7 @@ impl App {
                     }
                 }
                 if hosts.is_empty() {
-                    ui.label(RichText::new("No SSH hosts yet.").color(MUTED));
+                    ui.label(RichText::new("No SSH hosts yet.").color(MUTED()));
                 }
             });
             modal_buttons(ui, |ui| {
@@ -1929,9 +1944,9 @@ impl App {
             SAct::Transfer => {
                 let names = selected_sorted(s.pane(side));
                 if names.is_empty() {
-                    self.notify("Select a file or folder first".into(), AMBER);
+                    self.notify("Select a file or folder first".into(), AMBER());
                 } else if s.busy.is_some() {
-                    self.notify("Wait for the current transfer to finish".into(), AMBER);
+                    self.notify("Wait for the current transfer to finish".into(), AMBER());
                 } else {
                     // files with the same name in the other pane would be replaced: ask first
                     let dst = if side == Side::Local { &s.remote } else { &s.local };
@@ -1954,7 +1969,7 @@ impl App {
                 let mut files: Vec<String> = p.selected.iter().filter(|n| p.entries.iter().any(|e| &e.name == *n && !e.is_dir)).cloned().collect();
                 files.sort();
                 if files.is_empty() {
-                    self.notify("Select a file to open".into(), AMBER);
+                    self.notify("Select a file to open".into(), AMBER());
                 } else {
                     s.start_op(Op::OpenFiles(side, files, editor), "Opening…", ctx);
                 }
@@ -1965,13 +1980,13 @@ impl App {
                 if names.len() == 1 {
                     s.prompt = Some(Prompt { side, rename_from: Some(names[0].clone()), text: names[0].clone() });
                 } else {
-                    self.notify("Select exactly one item to rename".into(), AMBER);
+                    self.notify("Select exactly one item to rename".into(), AMBER());
                 }
             }
             SAct::Delete => {
                 let names = selected_sorted(s.pane(side));
                 if names.is_empty() {
-                    self.notify("Select a file or folder first".into(), AMBER);
+                    self.notify("Select a file or folder first".into(), AMBER());
                 } else {
                     s.confirm_del = Some((side, names));
                 }
@@ -2067,7 +2082,7 @@ impl App {
             if let (true, Some(p)) = (ok, p) {
                 let name = p.text.trim().to_string();
                 if name.is_empty() || name.contains('/') {
-                    self.notify("Enter a valid name".into(), AMBER);
+                    self.notify("Enter a valid name".into(), AMBER());
                 } else if let Some(old) = p.rename_from {
                     self.sftp.start_op(Op::Rename(p.side, old, name), "Renaming…", ctx);
                 } else {
@@ -2084,7 +2099,7 @@ impl App {
             let (_, closed) = app_modal(ctx, "sftp_overwrite_modal", "Replace existing?", |ui| {
                 ui.set_width(340.0);
                 ui.label(msg);
-                ui.label(RichText::new("Replacing overwrites what is there now. This cannot be undone.").size(12.0).color(MUTED));
+                ui.label(RichText::new("Replacing overwrites what is there now. This cannot be undone.").size(12.0).color(MUTED()));
                 modal_buttons(ui, |ui| {
                     if danger_button(ui, "Replace").clicked() {
                         over = Some(Some(true));
@@ -2119,7 +2134,7 @@ impl App {
             let (_, closed) = app_modal(ctx, "sftp_delete_modal", "Delete", |ui| {
                 ui.set_width(300.0);
                 ui.label(msg);
-                ui.label(RichText::new(format!("This removes it {} for good.", where_)).size(12.0).color(MUTED));
+                ui.label(RichText::new(format!("This removes it {} for good.", where_)).size(12.0).color(MUTED()));
                 modal_buttons(ui, |ui| {
                     if danger_button(ui, "Delete").clicked() {
                         del = Some(true);
@@ -2180,7 +2195,7 @@ impl App {
                 self.sftp.drag = Some(Side::Local);
             }
             if let Ok(t) = std::env::var("SSHTUP_DEMO_TOAST") {
-                let col = match t.as_str() { "red" => RED, "amber" => AMBER, _ => GREEN };
+                let col = match t.as_str() { "red" => RED(), "amber" => AMBER(), _ => GREEN() };
                 self.notify("Deleted 1 item".into(), col);
             }
             if std::env::var("SSHTUP_DEMO_NO_TRANSFERS").is_err() {
@@ -2245,7 +2260,7 @@ impl App {
             self.sftp.op_rx = None;
             self.sftp.busy = None;
             self.sftp.end_transfer(r.ok, &r.msg);
-            self.notify(r.msg, if r.ok { GREEN } else { RED });
+            self.notify(r.msg, if r.ok { GREEN() } else { RED() });
             if r.refresh_local && !self.demo {
                 let p = self.sftp.local.path.clone();
                 self.sftp.navigate(Side::Local, if p.is_empty() { "~".into() } else { p }, Mode::Stay, &ctx);
@@ -2262,7 +2277,7 @@ impl App {
             }
         }
         for r in saved {
-            self.notify(r.msg, if r.ok { GREEN } else { RED });
+            self.notify(r.msg, if r.ok { GREEN() } else { RED() });
             if r.refresh_remote && self.sftp.host.is_some() {
                 let p = self.sftp.remote.path.clone();
                 self.sftp.navigate(Side::Remote, if p.is_empty() { "~".into() } else { p }, Mode::Stay, &ctx);
@@ -2325,7 +2340,7 @@ impl App {
             None => draw_pane(ui, left, Side::Local, false, &None, &mut self.sftp.local, "Local", "icon:folder", Color32::from_rgb(0x4A, 0x4F, 0x6A), busy.as_deref().filter(|_| false), tz, &mut acts),
         }
         draw_pane(ui, right, Side::Remote, lhost, &self.sftp.cfg, &mut self.sftp.remote, &host.display_label(), &letter, color, busy.as_deref(), tz, &mut acts);
-        ui.painter().line_segment([Pos2::new(right.left(), full.top()), Pos2::new(right.left(), full.bottom())], Stroke::new(1.0, BORDER));
+        ui.painter().line_segment([Pos2::new(right.left(), full.top()), Pos2::new(right.left(), full.bottom())], Stroke::new(1.0, BORDER()));
         if panel_h > 0.0 {
             draw_transfers(ui, Rect::from_min_max(Pos2::new(full_all.left(), full.bottom()), Pos2::new(full_all.right(), full.bottom() + panel_h)), &mut self.sftp);
         }

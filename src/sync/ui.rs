@@ -73,7 +73,7 @@ impl App {
     pub fn settings_sync(&mut self, ui: &mut egui::Ui) {
         section_title(ui, "SYNC");
         if self.demo {
-            ui.label(RichText::new("Not available in a demo run.").size(12.0).color(MUTED));
+            ui.label(RichText::new("Not available in a demo run.").size(12.0).color(MUTED()));
             return;
         }
         let mut su = std::mem::take(&mut self.sync_rt.ui);
@@ -117,10 +117,10 @@ impl App {
         }
 
         if let Some(code) = su.recovery.clone() {
-            ui.label(RichText::new("Your recovery key").strong().size(13.0).color(TEXT));
-            ui.label(RichText::new("It is the only way back in if you forget the sync password. It is shown once and the server cannot give it back.").size(12.0).color(AMBER));
+            ui.label(RichText::new("Your recovery key").strong().size(13.0).color(TEXT()));
+            ui.label(RichText::new("It is the only way back in if you forget the sync password. It is shown once and the server cannot give it back.").size(12.0).color(AMBER()));
             ui.add_space(4.0);
-            ui.label(RichText::new(code).monospace().size(14.0).color(TEXT));
+            ui.label(RichText::new(code).monospace().size(14.0).color(TEXT()));
             ui.add_space(4.0);
             ui.checkbox(&mut su.recovery_saved, "I saved it somewhere safe");
             if su.recovery_saved && primary_button(ui, "Done").clicked() {
@@ -131,17 +131,17 @@ impl App {
         }
 
         if let Some(cfg) = self.vault.sync.clone() {
-            ui.label(RichText::new(format!("Signed in as {} on {}", cfg.email, cfg.server)).size(12.5).color(GREEN));
+            ui.label(RichText::new(format!("Signed in as {} on {}", cfg.email, cfg.server)).size(12.5).color(GREEN()));
             let rt = &self.sync_rt;
             let status = match (&rt.last_error, rt.last_ok_ms) {
-                (Some(e), _) => RichText::new(e).size(12.0).color(RED),
-                (None, Some(t)) => RichText::new(format!("Last sync {} ({})", ago(t), rt.summary)).size(12.0).color(MUTED),
-                (None, None) => RichText::new(if rt.rx.is_some() { "Syncing…" } else { "Waiting for the first sync" }).size(12.0).color(MUTED),
+                (Some(e), _) => RichText::new(e).size(12.0).color(RED()),
+                (None, Some(t)) => RichText::new(format!("Last sync {} ({})", ago(t), rt.summary)).size(12.0).color(MUTED()),
+                (None, None) => RichText::new(if rt.rx.is_some() { "Syncing…" } else { "Waiting for the first sync" }).size(12.0).color(MUTED()),
             };
             ui.label(status);
             if !self.sync_rt.state.as_ref().map(|s| s.replaced.is_empty()).unwrap_or(true) {
                 let n = self.sync_rt.state.as_ref().map(|s| s.replaced.len()).unwrap_or(0);
-                ui.label(RichText::new(format!("{n} older version(s) were replaced by newer ones from other devices. They are kept, encrypted, on this computer.")).size(12.0).color(MUTED));
+                ui.label(RichText::new(format!("{n} older version(s) were replaced by newer ones from other devices. They are kept, encrypted, on this computer.")).size(12.0).color(MUTED()));
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -154,7 +154,7 @@ impl App {
                 }
             });
             ui.add_space(8.0);
-            ui.label(RichText::new("Change the sync password").strong().size(12.5).color(TEXT));
+            ui.label(RichText::new("Change the sync password").strong().size(12.5).color(TEXT()));
             field(ui, &mut su.new_password, "New sync password (8+ characters). Other devices will be signed out.", true);
             if ui.add_enabled(su.op.is_none() && !su.new_password.is_empty(), egui::Button::new("Change password")).clicked() {
                 if let Some(key) = from_hex32(&cfg.sync_key) {
@@ -173,7 +173,7 @@ impl App {
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Devices").strong().size(12.5).color(TEXT));
+                ui.label(RichText::new("Devices").strong().size(12.5).color(TEXT()));
                 if ui.add_enabled(su.op.is_none(), egui::Button::new("Refresh")).clicked() {
                     let (tx, rx) = channel();
                     su.op = Some(rx);
@@ -192,7 +192,7 @@ impl App {
                     ui.horizontal(|ui| {
                         let name = d["name"].as_str().unwrap_or("?");
                         let cur = d["current"].as_bool().unwrap_or(false);
-                        ui.label(RichText::new(format!("{name}{}  ·  last seen {}", if cur { " (this computer)" } else { "" }, ago(d["last_seen"].as_u64().unwrap_or(0)))).size(12.0).color(MUTED));
+                        ui.label(RichText::new(format!("{name}{}  ·  last seen {}", if cur { " (this computer)" } else { "" }, ago(d["last_seen"].as_u64().unwrap_or(0)))).size(12.0).color(MUTED()));
                         if !cur && ui.small_button("Sign out this device").clicked() {
                             revoke = d["id"].as_i64();
                         }
@@ -214,10 +214,10 @@ impl App {
             }
         } else {
             let encrypted = self.vault_key.is_some();
-            ui.label(RichText::new("Keep your hosts, identities, keys and snippets in step on all your devices. Everything is encrypted on this computer before it is sent; the server only stores scrambled data.").size(12.0).color(MUTED));
+            ui.label(RichText::new("Keep your hosts, identities, keys and snippets in step on all your devices. Everything is encrypted on this computer before it is sent; the server only stores scrambled data.").size(12.0).color(MUTED()));
             if !encrypted {
                 ui.add_space(4.0);
-                ui.label(RichText::new("Turn on the master password first (Security, below). Sync keeps its keys inside the encrypted vault.").size(12.0).color(AMBER));
+                ui.label(RichText::new("Turn on the master password first (Security, below). Sync keeps its keys inside the encrypted vault.").size(12.0).color(AMBER()));
             }
             ui.add_space(6.0);
             let busy = su.working.is_some();
@@ -237,7 +237,7 @@ impl App {
                 });
             });
             if busy {
-                ui.label(RichText::new("Working…").size(12.0).color(MUTED));
+                ui.label(RichText::new("Working…").size(12.0).color(MUTED()));
             }
             ui.add_space(6.0);
             if ui.small_button(if su.show_recover { "Hide password recovery" } else { "Forgot the sync password?" }).clicked() {
@@ -268,7 +268,7 @@ impl App {
         }
         if let Some((m, ok)) = &su.message {
             ui.add_space(4.0);
-            ui.label(RichText::new(m).size(12.0).color(if *ok { GREEN } else { RED }));
+            ui.label(RichText::new(m).size(12.0).color(if *ok { GREEN() } else { RED() }));
         }
     }
 
@@ -367,7 +367,7 @@ impl App {
             }
         };
         ui.add_space(8.0);
-        ui.label(RichText::new("Who can see this").size(12.0).color(MUTED));
+        ui.label(RichText::new("Who can see this").size(12.0).color(MUTED()));
         egui::ComboBox::from_id_salt("new_share_scope").width(ui.available_width() - 8.0).selected_text(name_of(&cur)).show_ui(ui, |ui| {
             if ui.selectable_label(cur == "u", "Only me").clicked() {
                 self.sync_rt.ui.new_scope = Some("u".into());
@@ -380,7 +380,7 @@ impl App {
             }
         });
         if cur != "u" {
-            ui.label(RichText::new("Every team member can read saved passwords and keys on this item.").size(11.5).color(AMBER));
+            ui.label(RichText::new("Every team member can read saved passwords and keys on this item.").size(11.5).color(AMBER()));
         }
     }
 
@@ -401,7 +401,7 @@ impl App {
             let name = scope.strip_prefix("t:").and_then(|n| n.parse::<i64>().ok()).and_then(|t| cfg.teams.iter().find(|x| x.id == t)).map(|x| x.name.clone()).unwrap_or_else(|| "the team".into());
             self.sync_rt.want_now = true;
             self.dirty = true;
-            self.notify(format!("Shared with team {name}"), GREEN);
+            self.notify(format!("Shared with team {name}"), GREEN());
         }
     }
 
@@ -420,10 +420,10 @@ impl App {
             }
         };
         ui.add_space(8.0);
-        ui.label(RichText::new(if kind == "group" { "Who can see this group" } else { "Who can see this" }).size(12.0).color(MUTED));
+        ui.label(RichText::new(if kind == "group" { "Who can see this group" } else { "Who can see this" }).size(12.0).color(MUTED()));
         if kind == "group" {
             let n = super::teams::group_items(&self.vault, id).len();
-            ui.label(RichText::new(format!("Applies to the group, its sub-groups, their hosts and the keys and identities they use ({n} items). New hosts added to it follow.")).size(11.5).color(MUTED));
+            ui.label(RichText::new(format!("Applies to the group, its sub-groups, their hosts and the keys and identities they use ({n} items). New hosts added to it follow.")).size(11.5).color(MUTED()));
         }
         let mut pick: Option<String> = None;
         egui::ComboBox::from_id_salt("share_scope").width(ui.available_width() - 8.0).selected_text(name_of(&cur)).show_ui(ui, |ui| {
@@ -440,7 +440,7 @@ impl App {
         let mut confirmed = false;
         if let Some((pid, psc, warn)) = self.sync_rt.ui.pending_move.clone() {
             if pid == item {
-                ui.label(RichText::new(warn).size(12.0).color(AMBER));
+                ui.label(RichText::new(warn).size(12.0).color(AMBER()));
                 ui.horizontal(|ui| {
                     if danger_button(ui, "Share it").clicked() {
                         pick = Some(psc.clone());
@@ -461,7 +461,7 @@ impl App {
                         self.sync_rt.ui.pending_move = None;
                         self.sync_rt.want_now = true;
                         self.dirty = true;
-                        self.notify(format!("{n} item{} moved", if n == 1 { "" } else { "s" }), GREEN);
+                        self.notify(format!("{n} item{} moved", if n == 1 { "" } else { "s" }), GREEN());
                     }
                     Err(super::teams::MoveErr::NeedsConfirm(w)) => self.sync_rt.ui.pending_move = Some((item, scope, w)),
                     Err(_) => {}
@@ -483,28 +483,28 @@ impl App {
     fn sync_teams_ui(&mut self, ui: &mut egui::Ui, su: &mut SyncUi, cfg: &SyncConfig) {
         use sync_client::teams as tm;
         ui.add_space(8.0);
-        ui.label(RichText::new("Teams").strong().size(12.5).color(TEXT));
+        ui.label(RichText::new("Teams").strong().size(12.5).color(TEXT()));
         if let Some(xp) = from_hex32(&cfg.x_public) {
-            ui.label(RichText::new(format!("Your fingerprint: {}", tm::own_fingerprint(&xp))).monospace().size(11.5).color(MUTED));
-            ui.label(RichText::new("The owner of a team sees this number when adding you. Read it to them (phone, chat) before they confirm.").size(11.5).color(MUTED));
+            ui.label(RichText::new(format!("Your fingerprint: {}", tm::own_fingerprint(&xp))).monospace().size(11.5).color(MUTED()));
+            ui.label(RichText::new("The owner of a team sees this number when adding you. Read it to them (phone, chat) before they confirm.").size(11.5).color(MUTED()));
         }
         let (server, token) = (cfg.server.clone(), cfg.token.clone());
         for t in self.sync_rt.teams.clone() {
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("Team {}{}", t.name, if t.owner { " (you own it)" } else { "" })).size(12.5).color(TEXT));
+            ui.label(RichText::new(format!("Team {}{}", t.name, if t.owner { " (you own it)" } else { "" })).size(12.5).color(TEXT()));
             if !t.ready() {
-                ui.label(RichText::new(if t.owner { "The team key is being renewed after a removal." } else { "Waiting for the owner to renew the team key. Shared items are paused until then." }).size(11.5).color(AMBER));
+                ui.label(RichText::new(if t.owner { "The team key is being renewed after a removal." } else { "Waiting for the owner to renew the team key. Shared items are paused until then." }).size(11.5).color(AMBER()));
             }
             for m in &t.members {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("   {} — {}", m.email, m.fingerprint)).monospace().size(11.0).color(MUTED));
+                    ui.label(RichText::new(format!("   {} — {}", m.email, m.fingerprint)).monospace().size(11.0).color(MUTED()));
                     if t.owner && m.role != "owner" && t.ready() && t.stale_items == 0 && ui.add_enabled(su.op.is_none(), egui::Button::new("Remove").small()).clicked() {
                         su.confirm_remove = Some((t.id, m.user_id, m.email.clone()));
                     }
                 });
             }
             if let Some((tid, uid, email)) = su.confirm_remove.clone().filter(|c| c.0 == t.id) {
-                ui.label(RichText::new(format!("Remove {email}? The team key is replaced and every shared item is sealed again, so they cannot read anything new. They keep what they already saw: change any password they could read.")).size(12.0).color(AMBER));
+                ui.label(RichText::new(format!("Remove {email}? The team key is replaced and every shared item is sealed again, so they cannot read anything new. They keep what they already saw: change any password they could read.")).size(12.0).color(AMBER()));
                 ui.horizontal(|ui| {
                     if danger_button(ui, "Remove and renew the key").clicked() {
                         let (tx, rx) = channel();
@@ -556,9 +556,9 @@ impl App {
             }
         }
         if let Some((team, who)) = su.candidate.clone() {
-            ui.label(RichText::new(format!("{} has the fingerprint:", who.email)).size(12.0).color(TEXT));
-            ui.label(RichText::new(&who.fingerprint).monospace().size(13.0).color(AMBER));
-            ui.label(RichText::new("Ask them to read the number in their own Settings → Sync. Add them only if it is the same.").size(12.0).color(MUTED));
+            ui.label(RichText::new(format!("{} has the fingerprint:", who.email)).size(12.0).color(TEXT()));
+            ui.label(RichText::new(&who.fingerprint).monospace().size(13.0).color(AMBER()));
+            ui.label(RichText::new("Ask them to read the number in their own Settings → Sync. Add them only if it is the same.").size(12.0).color(MUTED()));
             ui.horizontal(|ui| {
                 if primary_button(ui, "The numbers match, add to the team").clicked() {
                     let key = self.sync_rt.teams.iter().find(|t| t.id == team).and_then(|t| t.key.clone());

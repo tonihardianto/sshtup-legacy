@@ -61,6 +61,10 @@ const TERMINAL: &[Group] = &[
 ];
 
 const GENERAL: &[Group] = &[
+    Group { title: "Appearance", rows: &[
+        Row { key: "apptheme", title: "App theme", desc: "Colors of the app itself. Terminals keep their own color scheme", also: "dark light mode system look" },
+        Row { key: "uifont", title: "Interface font", desc: "The font of menus, labels and buttons. Terminals have their own font", also: "typeface text inter dm sans system" },
+    ] },
     Group { title: "Profile", rows: &[Row { key: "name", title: "Your name", desc: "Shown to the others in a shared terminal", also: "profile collaboration avatar" }] },
     Group {
         title: "Connection",
@@ -90,6 +94,8 @@ fn hit(q: &str, g: &Group, r: &Row) -> bool {
 fn reset(s: &mut Settings, key: &str) {
     let d = Settings::default();
     match key {
+        "apptheme" => s.app_theme = d.app_theme,
+        "uifont" => s.ui_font = d.ui_font,
         "scheme" => s.color_scheme = d.color_scheme,
         "font" => s.font_family = d.font_family,
         "size" => s.font_size = d.font_size,
@@ -158,10 +164,10 @@ struct RowCtx<'a> {
 /// A row of buttons, one of them chosen.
 fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) -> bool {
     let font = FontId::proportional(12.5);
-    let widths: Vec<f32> = options.iter().map(|(_, t)| ui.painter().layout_no_wrap(t.to_string(), font.clone(), TEXT).size().x + 26.0).collect();
+    let widths: Vec<f32> = options.iter().map(|(_, t)| ui.painter().layout_no_wrap(t.to_string(), font.clone(), TEXT()).size().x + 26.0).collect();
     let (rect, _) = ui.allocate_exact_size(Vec2::new(widths.iter().sum::<f32>() + 6.0, 32.0), Sense::hover());
     let p = ui.painter();
-    p.rect(rect, 8.0, BG_WINDOW, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    p.rect(rect, 8.0, BG_WINDOW(), Stroke::new(1.0, BORDER()), StrokeKind::Inside);
     let mut x = rect.left() + 3.0;
     let mut changed = false;
     for ((v, text), w) in options.iter().zip(widths) {
@@ -169,11 +175,11 @@ fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(
         let resp = ui.interact(r, ui.id().with(("seg", text)), Sense::click());
         let on = *value == *v;
         if on {
-            ui.painter().rect_filled(r, 6.0, CARD_HOVER);
+            ui.painter().rect_filled(r, 6.0, CARD_HOVER());
         } else if resp.hovered() {
-            ui.painter().rect_filled(r, 6.0, CARD);
+            ui.painter().rect_filled(r, 6.0, CARD());
         }
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, *text, font.clone(), if on || resp.hovered() { TEXT } else { MUTED });
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, *text, font.clone(), if on || resp.hovered() { TEXT() } else { MUTED() });
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() && !on {
             *value = *v;
             changed = true;
@@ -186,16 +192,16 @@ fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(
 /// "−  13 px  +"
 fn stepper(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> bool {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(128.0, 32.0), Sense::hover());
-    ui.painter().rect(rect, 8.0, BG_WINDOW, Stroke::new(1.0, BORDER), StrokeKind::Inside);
+    ui.painter().rect(rect, 8.0, BG_WINDOW(), Stroke::new(1.0, BORDER()), StrokeKind::Inside);
     let mut changed = false;
     for (i, sign) in [(0, -1.0), (1, 1.0)] {
         let r = if i == 0 { Rect::from_min_size(rect.min, Vec2::new(34.0, rect.height())) } else { Rect::from_min_size(Pos2::new(rect.right() - 34.0, rect.top()), Vec2::new(34.0, rect.height())) };
         let resp = ui.interact(r.shrink(3.0), ui.id().with(("step", i)), Sense::click());
         let can = if sign < 0.0 { *value > min } else { *value < max };
         if resp.hovered() && can {
-            ui.painter().rect_filled(r.shrink(3.0), 6.0, CARD);
+            ui.painter().rect_filled(r.shrink(3.0), 6.0, CARD());
         }
-        let col = if !can { BORDER } else if resp.hovered() { TEXT } else { MUTED };
+        let col = if !can { BORDER() } else if resp.hovered() { TEXT() } else { MUTED() };
         let c = r.center();
         ui.painter().line_segment([c - Vec2::new(5.0, 0.0), c + Vec2::new(5.0, 0.0)], Stroke::new(1.6, col));
         if sign > 0.0 {
@@ -206,7 +212,7 @@ fn stepper(ui: &mut egui::Ui, value: &mut f32, min: f32, max: f32) -> bool {
             changed = true;
         }
     }
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("{} px", value.round() as i32), FontId::proportional(12.5), TEXT);
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, format!("{} px", value.round() as i32), FontId::proportional(12.5), TEXT());
     changed
 }
 
@@ -244,7 +250,7 @@ fn control(ui: &mut egui::Ui, key: &str, cx: &mut RowCtx) {
         "lineh" => ch |= segmented(ui, &mut s.line_height, &[(1.0, "1.0"), (1.2, "1.2"), (1.4, "1.4")]),
         "cursor" => {
             ch |= toggle(ui, &mut s.cursor_blink).changed();
-            ui.label(RichText::new("Blink").size(12.5).color(MUTED));
+            ui.label(RichText::new("Blink").size(12.5).color(MUTED()));
             ui.add_space(10.0);
             let mut shape: &str = match s.cursor_shape.as_str() {
                 "bar" => "bar",
@@ -321,6 +327,25 @@ fn control(ui: &mut egui::Ui, key: &str, cx: &mut RowCtx) {
                 ch |= ui.selectable_value(&mut s.default_editor, k.to_string(), label).changed();
             }
         }),
+        "uifont" => {
+            let current = crate::fonts::UI_FONTS.iter().find(|(k, _)| *k == s.ui_font).map(|(_, n)| *n).unwrap_or("Inter");
+            combo(ui, "uifont", 190.0, current, |ui| {
+                for (k, n) in crate::fonts::UI_FONTS {
+                    ch |= ui.selectable_value(&mut s.ui_font, k.to_string(), *n).changed();
+                }
+            });
+        }
+        "apptheme" => {
+            let mut v: &str = match s.app_theme.as_str() {
+                "light" => "light",
+                "system" => "system",
+                _ => "dark",
+            };
+            if segmented(ui, &mut v, &[("dark", "Dark"), ("light", "Light"), ("system", "System")]) {
+                s.app_theme = v.to_string();
+                ch = true;
+            }
+        }
         "sort" => {
             let mut by: &str = if s.sort_by == "Name" { "Name" } else { "Date" };
             if segmented(ui, &mut by, &[("Date", "Last used"), ("Name", "Name")]) {
@@ -345,18 +370,18 @@ fn draw_row(ui: &mut egui::Ui, r: &Row, cx: &mut RowCtx) {
         ui.vertical(|ui| {
             ui.set_width(text_w);
             ui.spacing_mut().item_spacing.y = 3.0;
-            ui.label(RichText::new(r.title).size(13.5).color(TEXT));
+            ui.label(RichText::new(r.title).size(13.5).color(TEXT()));
             if !desc.is_empty() {
-                ui.label(RichText::new(desc).size(11.5).color(MUTED));
+                ui.label(RichText::new(desc).size(11.5).color(MUTED()));
             }
             if r.key == "rhist" {
                 ui.add_space(2.0);
-                chip(ui, "Runs a command on the server", AMBER);
+                chip(ui, "Runs a command on the server", AMBER());
             }
             if r.key == "scheme" && !cx.own_scheme.is_empty() {
                 let n = cx.own_scheme.len();
                 let text = if n == 1 { "1 host has its own scheme".to_string() } else { format!("{n} hosts have their own scheme") };
-                ui.label(RichText::new(text).size(11.5).color(BLUE)).on_hover_text(cx.own_scheme.join("\n"));
+                ui.label(RichText::new(text).size(11.5).color(BLUE())).on_hover_text(cx.own_scheme.join("\n"));
             }
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| control(ui, r.key, cx));
@@ -371,11 +396,11 @@ fn draw_group(ui: &mut egui::Ui, g: &Group, q: &str, cx: &mut RowCtx) -> bool {
         return false;
     }
     ui.horizontal(|ui| {
-        ui.label(RichText::new(g.title).size(14.5).strong().color(TEXT));
+        ui.label(RichText::new(g.title).size(14.5).strong().color(TEXT()));
         if resettable(g) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let on = differs(cx.s, g);
-                let b = ui.add_enabled(on, egui::Button::new(RichText::new("Reset to defaults").size(12.0).color(if on { BLUE } else { MUTED })).frame(false));
+                let b = ui.add_enabled(on, egui::Button::new(RichText::new("Reset to defaults").size(12.0).color(if on { BLUE() } else { MUTED() })).frame(false));
                 if b.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     for r in g.rows {
                         reset(cx.s, r.key);
@@ -386,13 +411,13 @@ fn draw_group(ui: &mut egui::Ui, g: &Group, q: &str, cx: &mut RowCtx) -> bool {
         }
     });
     ui.add_space(4.0);
-    Frame::new().fill(CARD).stroke(Stroke::new(1.0, BORDER)).corner_radius(10).inner_margin(Margin::symmetric(16, 0)).show(ui, |ui| {
+    Frame::new().fill(CARD()).stroke(Stroke::new(1.0, BORDER())).corner_radius(10).inner_margin(Margin::symmetric(16, 0)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 0.0;
         for (i, r) in rows.iter().enumerate() {
             if i > 0 {
                 let (sep, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-                ui.painter().hline(sep.x_range(), sep.center().y, Stroke::new(1.0, BORDER.linear_multiply(0.7)));
+                ui.painter().hline(sep.x_range(), sep.center().y, Stroke::new(1.0, BORDER().linear_multiply(0.7)));
             }
             draw_row(ui, r, cx);
         }
@@ -417,9 +442,9 @@ fn preview(ui: &mut egui::Ui, s: &Settings, below: bool) {
     let pal = |i: usize| rgb(sch.palette[i]);
     let fg = rgb(sch.foreground);
     let bg = rgb(sch.background);
-    ui.label(RichText::new("Preview").size(14.5).strong().color(TEXT));
+    ui.label(RichText::new("Preview").size(14.5).strong().color(TEXT()));
     ui.add_space(4.0);
-    Frame::new().fill(CARD).stroke(Stroke::new(1.0, BORDER)).corner_radius(10).inner_margin(Margin::same(12)).show(ui, |ui| {
+    Frame::new().fill(CARD()).stroke(Stroke::new(1.0, BORDER())).corner_radius(10).inner_margin(Margin::same(12)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         let w = ui.available_width();
         let mut size = s.font_size.clamp(8.0, 20.0);
@@ -477,8 +502,8 @@ fn preview(ui: &mut egui::Ui, s: &Settings, below: bool) {
         ui.add_space(10.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
-            ui.label(RichText::new(sch.name).size(12.5).strong().color(TEXT));
-            ui.label(RichText::new(format!("{} · {} px", crate::fonts::label(&s.font_family), s.font_size.round() as i32)).size(11.5).color(MUTED));
+            ui.label(RichText::new(sch.name).size(12.5).strong().color(TEXT()));
+            ui.label(RichText::new(format!("{} · {} px", crate::fonts::label(&s.font_family), s.font_size.round() as i32)).size(11.5).color(MUTED()));
         });
         ui.add_space(6.0);
         let gap = 5.0;
@@ -488,13 +513,13 @@ fn preview(ui: &mut egui::Ui, s: &Settings, below: bool) {
             for k in 0..8 {
                 let i = half * 8 + k;
                 let r = Rect::from_min_size(Pos2::new(rowr.left() + k as f32 * (sw + gap), rowr.top()), Vec2::new(sw, 22.0));
-                ui.painter().rect(r, 5.0, pal(i), Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
+                ui.painter().rect(r, 5.0, pal(i), Stroke::new(1.0, wash(18)), StrokeKind::Inside);
                 ui.interact(r, ui.id().with(("swatch", i)), Sense::hover()).on_hover_text(format!("{}  #{:06X}", ANSI[i], sch.palette[i]));
             }
             ui.add_space(4.0);
         }
         ui.add_space(4.0);
-        ui.label(RichText::new(if below { "Preview follows every change below" } else { "Preview follows every change on the left" }).size(11.0).color(MUTED));
+        ui.label(RichText::new(if below { "Preview follows every change below" } else { "Preview follows every change on the left" }).size(11.0).color(MUTED()));
     });
 }
 
@@ -508,8 +533,8 @@ pub(crate) fn search_field(ui: &mut egui::Ui, text: &mut String, width: f32, id:
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 34.0), Sense::hover());
     let id = egui::Id::new(id);
     let focused = ui.memory(|m| m.has_focus(id));
-    ui.painter().rect(rect, 8.0, CARD, Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE } else { BORDER }), StrokeKind::Inside);
-    icons::paint(ui.painter(), Pos2::new(rect.left() + 17.0, rect.center().y), 14.0, Icon::Search, MUTED);
+    ui.painter().rect(rect, 8.0, CARD(), Stroke::new(if focused { 1.5 } else { 1.0 }, if focused { BLUE() } else { BORDER() }), StrokeKind::Inside);
+    icons::paint(ui.painter(), Pos2::new(rect.left() + 17.0, rect.center().y), 14.0, Icon::Search, MUTED());
     let clear_w = if text.is_empty() { 0.0 } else { 28.0 };
     let inner = Rect::from_min_max(rect.min + Vec2::new(34.0, 0.0), rect.max - Vec2::new(10.0 + clear_w, 0.0));
     let mut edit_ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
@@ -530,9 +555,9 @@ pub(crate) fn search_field(ui: &mut egui::Ui, text: &mut String, width: f32, id:
         let cr = Rect::from_center_size(Pos2::new(rect.right() - 20.0, rect.center().y), Vec2::splat(22.0));
         let resp = ui.interact(cr, id.with("clear"), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(cr, 5.0, BORDER);
+            ui.painter().rect_filled(cr, 5.0, BORDER());
         }
-        icons::paint(ui.painter(), cr.center(), 12.0, Icon::Close, if resp.hovered() { TEXT } else { MUTED });
+        icons::paint(ui.painter(), cr.center(), 12.0, Icon::Close, if resp.hovered() { TEXT() } else { MUTED() });
         if resp.on_hover_text("Clear the search").clicked() {
             text.clear();
         }
@@ -543,10 +568,150 @@ pub(crate) fn search_field(ui: &mut egui::Ui, text: &mut String, width: f32, id:
 fn check_mark(ui: &mut egui::Ui) {
     let (r, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
     let c = r.center();
-    ui.painter().add(egui::Shape::line(vec![c + Vec2::new(-4.5, 0.0), c + Vec2::new(-1.5, 3.0), c + Vec2::new(4.5, -3.5)], Stroke::new(1.8, GREEN)));
+    ui.painter().add(egui::Shape::line(vec![c + Vec2::new(-4.5, 0.0), c + Vec2::new(-1.5, 3.0), c + Vec2::new(4.5, -3.5)], Stroke::new(1.8, GREEN())));
+}
+
+/// The app icon as a texture, decoded once and kept in egui's memory.
+fn app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new("app-icon-texture");
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(t);
+    }
+    let img = image::load_from_memory(include_bytes!("../assets/icon.png")).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let tex = ctx.load_texture("app-icon", egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, tex.clone()));
+    Some(tex)
+}
+
+const REPO_URL: &str = "https://github.com/tonihardianto/sshtup";
+
+/// A titled card on the About tab.
+fn about_card(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.label(RichText::new(title).size(14.5).strong().color(TEXT()));
+    ui.add_space(4.0);
+    Frame::new().fill(CARD()).stroke(Stroke::new(1.0, BORDER())).corner_radius(10).inner_margin(Margin::symmetric(16, 0)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add(ui);
+    });
+    ui.add_space(24.0);
+}
+
+/// One row of an About card: a label on the left, the value on the right.
+fn about_row(ui: &mut egui::Ui, label: &str, separator: bool, value: impl FnOnce(&mut egui::Ui)) {
+    if separator {
+        let (sep, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
+        ui.painter().hline(sep.x_range(), sep.center().y, Stroke::new(1.0, BORDER().linear_multiply(0.7)));
+    }
+    ui.horizontal(|ui| {
+        ui.set_min_height(42.0);
+        ui.label(RichText::new(label).size(13.5));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), value);
+    });
 }
 
 impl App {
+    /// The About tab: what this app is, its version and where to find it.
+    fn settings_about(&mut self, ui: &mut egui::Ui) {
+        let version = env!("CARGO_PKG_VERSION");
+        let platform = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+        let data_path = data_dir().to_string_lossy().to_string();
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 16.0;
+            let (tile, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
+            match app_icon(ui.ctx()) {
+                Some(tex) => {
+                    ui.painter().image(tex.id(), tile, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                }
+                None => {
+                    ui.painter().rect_filled(tile, 14.0, BLUE().linear_multiply(0.18));
+                    crate::icons::paint(ui.painter(), tile.center(), 28.0, crate::icons::Icon::Terminal, BLUE());
+                }
+            }
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new("SSHTUP").size(24.0).strong());
+                ui.label(RichText::new(format!("Version {version}")).size(13.0).color(MUTED()));
+                ui.label(RichText::new("An SSH client with self-hosted sync.").size(13.0).color(TEXT()));
+            });
+        });
+        ui.add_space(20.0);
+        if flat_button(ui, "Copy version info").on_hover_text("Handy to paste into a bug report").clicked() {
+            ui.ctx().copy_text(format!("SSHTUP {version} ({platform})"));
+            self.toast = Some(("Version info copied".into(), std::time::Instant::now(), GREEN()));
+        }
+        ui.add_space(22.0);
+
+        about_card(ui, "Details", |ui| {
+            about_row(ui, "Version", false, |ui| {
+                ui.label(RichText::new(version).size(13.0).color(MUTED()));
+            });
+            about_row(ui, "Platform", true, |ui| {
+                ui.label(RichText::new(&platform).size(13.0).color(MUTED()));
+            });
+            about_row(ui, "License", true, |ui| {
+                ui.label(RichText::new("MIT").size(13.0).color(MUTED()));
+            });
+            about_row(ui, "Built with", true, |ui| {
+                ui.label(RichText::new("Rust and egui").size(13.0).color(MUTED()));
+            });
+            about_row(ui, "Data folder", true, |ui| {
+                ui.add(egui::Label::new(RichText::new(&data_path).monospace().size(11.5).color(MUTED())).truncate()).on_hover_text(&data_path);
+            });
+        });
+
+        let update = self.updates.state();
+        let mut check = false;
+        about_card(ui, "Updates", |ui| {
+            about_row(ui, "Status", false, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let busy = update == crate::update::State::Checking;
+                    if ui.add_enabled(!busy, egui::Button::new(RichText::new(if busy { "Checking…" } else { "Check for updates" }).size(12.5)).min_size(Vec2::new(0.0, 30.0))).clicked() {
+                        check = true;
+                    }
+                    ui.add_space(8.0);
+                    match &update {
+                        crate::update::State::Idle => {
+                            ui.label(RichText::new(format!("You have {version}")).size(13.0).color(MUTED()));
+                        }
+                        crate::update::State::Checking => {
+                            ui.spinner();
+                        }
+                        crate::update::State::UpToDate => {
+                            ui.label(RichText::new("You are up to date").size(13.0).color(GREEN()));
+                        }
+                        crate::update::State::Available { version: v, url } => {
+                            ui.hyperlink_to(RichText::new(format!("Version {v} is available — download")).size(13.0), url);
+                        }
+                        crate::update::State::Failed(msg) => {
+                            ui.add(egui::Label::new(RichText::new(msg).size(12.5).color(RED())).truncate());
+                        }
+                    }
+                });
+            });
+        });
+        if check {
+            self.updates.start(ui.ctx());
+        }
+
+        about_card(ui, "Links", |ui| {
+            about_row(ui, "Project", false, |ui| {
+                ui.hyperlink_to(RichText::new("github.com/tonihardianto/sshtup").size(13.0), REPO_URL);
+            });
+            about_row(ui, "Latest release", true, |ui| {
+                ui.hyperlink_to(RichText::new("Download").size(13.0), format!("{REPO_URL}/releases/latest"));
+            });
+            about_row(ui, "Problems or ideas", true, |ui| {
+                ui.hyperlink_to(RichText::new("Open an issue").size(13.0), format!("{REPO_URL}/issues"));
+            });
+        });
+
+        ui.add(egui::Label::new(RichText::new("Early software. The encryption design has not had an independent review, so read SYNC.md before trusting it with anything important. The colour schemes other than Default Dark and Light are community themes that belong to their authors.").size(12.0).color(MUTED())).wrap());
+        ui.add_space(20.0);
+    }
+
     pub fn screen_settings(&mut self, ui: &mut egui::Ui) {
         // header: title, the autosave note, search
         let mut query = std::mem::take(&mut self.settings_query);
@@ -554,7 +719,7 @@ impl App {
             ui.label(RichText::new("Settings").size(22.0).strong());
             ui.add_space(8.0);
             check_mark(ui);
-            ui.label(RichText::new("Changes save automatically").size(12.0).color(MUTED));
+            ui.label(RichText::new("Changes save automatically").size(12.0).color(MUTED()));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let w = (ui.available_width() - 20.0).clamp(160.0, 300.0);
                 search_box(ui, &mut query, w);
@@ -566,17 +731,17 @@ impl App {
 
         // tabs, underlined
         let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::hover());
-        ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, BORDER));
+        ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, BORDER()));
         let mut x = bar.left();
-        for (i, name) in ["Terminal", "General", "Security", "Sync"].iter().enumerate() {
+        for (i, name) in ["Terminal", "General", "Security", "Sync", "About"].iter().enumerate() {
             let on = self.settings_tab == i as u8 && !searching;
-            let g = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.5), TEXT);
+            let g = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.5), TEXT());
             let r = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(g.size().x + 4.0, bar.height()));
             let resp = ui.interact(r, egui::Id::new(("settings-tab", i)), Sense::click());
-            let col = if on || resp.hovered() { TEXT } else { MUTED };
+            let col = if on || resp.hovered() { TEXT() } else { MUTED() };
             ui.painter().text(Pos2::new(r.left() + 2.0, r.center().y - 2.0), Align2::LEFT_CENTER, *name, FontId::proportional(13.5), col);
             if on {
-                ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), bar.bottom() - 2.0), Pos2::new(r.right(), bar.bottom())), 1.0, BLUE);
+                ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), bar.bottom() - 2.0), Pos2::new(r.right(), bar.bottom())), 1.0, BLUE());
             }
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 self.settings_tab = i as u8;
@@ -630,8 +795,8 @@ impl App {
                 }
                 if !any {
                     ui.add_space(30.0);
-                    ui.label(RichText::new(format!("No settings match \u{201C}{}\u{201D}", query.trim())).size(14.0).color(TEXT));
-                    ui.label(RichText::new("Security and Sync have their own tabs.").size(12.0).color(MUTED));
+                    ui.label(RichText::new(format!("No settings match \u{201C}{}\u{201D}", query.trim())).size(14.0).color(TEXT()));
+                    ui.label(RichText::new("Security and Sync have their own tabs.").size(12.0).color(MUTED()));
                 }
             } else {
                 for g in if tab == 0 { TERMINAL } else { GENERAL } {
@@ -641,14 +806,14 @@ impl App {
         });
         }
         let (changed, clear_now) = (cx.changed, cx.clear_now);
-        // Security and Sync draw themselves (they need the whole App)
+        // Security, Sync and About draw themselves (they need the whole App)
         if own_page {
             egui::ScrollArea::vertical().auto_shrink(false).id_salt(("settings_scroll", tab)).show(&mut lui, |ui| {
                 ui.set_max_width(ui.available_width().min(720.0));
-                if tab == 2 {
-                    self.settings_security(ui);
-                } else {
-                    self.settings_sync(ui);
+                match tab {
+                    2 => self.settings_security(ui),
+                    3 => self.settings_sync(ui),
+                    _ => self.settings_about(ui),
                 }
             });
         }
@@ -663,7 +828,7 @@ impl App {
             self.history.clear();
             self.hist_tried.clear();
             self.history.save();
-            self.toast = Some(("Command history cleared".into(), std::time::Instant::now(), GREEN));
+            self.toast = Some(("Command history cleared".into(), std::time::Instant::now(), GREEN()));
         }
         if changed {
             self.dirty = true;
@@ -716,6 +881,8 @@ mod tests {
                 }
                 let mut s = Settings::default();
                 // flip everything a reset could touch, then check the row's reset brings back something
+                s.app_theme = "light".into();
+                s.ui_font = "dmsans".into();
                 s.color_scheme = "x".into();
                 s.font_family = "x".into();
                 s.font_size = 30.0;

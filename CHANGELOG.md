@@ -5,6 +5,20 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+## 0.3.0
+
+- **App theme**: Settings > General > Appearance now has Dark, Light and System for the app itself. Terminals keep
+  their own color scheme. The Dark palette is a little lighter than before, so panels, cards and the sidebar are easier
+  to tell apart; the tab strip stays dark in both themes.
+- **Interface font**: choose Inter (the new default), DM Sans, the system font or the classic egui font. Inter and DM
+  Sans are bundled (SIL Open Font License, texts in `assets/fonts`).
+- **Check for updates** in Settings > About: asks GitHub for the latest release when you press the button and links to
+  the download. Nothing is checked on its own.
+- Settings > About tab with the version, platform, data folder and links.
+- Forms: one design for hosts, keys, identities, port forwards and snippets, with required-field hints, a collapsible
+  Advanced section, and only **Save** and **Save & connect** at the bottom. The panel slides in and out smoothly.
+- Scrollbars are thin and follow the app colors; the panel resize line no longer flashes on hover.
+
 ## 0.2.1
 
 - Dependencies: axum 0.8, rusqlite 0.42, x25519-dalek 3, chacha20poly1305 0.11, base64 0.23 and newer GitHub Actions.

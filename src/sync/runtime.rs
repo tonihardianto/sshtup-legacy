@@ -216,7 +216,7 @@ impl App {
                         .collect();
                     for gone in old.iter().filter(|id| !teams.iter().any(|t| t.id == **id)) {
                         let n = super::teams::release_team(self.sync_rt.state.as_mut().unwrap(), &super::teams::scope_of(*gone), now);
-                        self.notify(format!("You are no longer in a team you shared with. Its {n} item(s) stay on this computer as your own."), crate::ui::AMBER);
+                        self.notify(format!("You are no longer in a team you shared with. Its {n} item(s) stay on this computer as your own."), crate::ui::AMBER());
                     }
                     if cfg_now.teams.iter().map(|t| (t.id, t.epoch, t.key.clone(), t.name.clone())).collect::<Vec<_>>() != cfg.teams.iter().map(|t| (t.id, t.epoch, t.key.clone(), t.name.clone())).collect::<Vec<_>>() {
                         self.vault.sync = Some(cfg_now);
@@ -249,7 +249,7 @@ impl App {
                     self.sync_rt.summary.push_str(&format!(", {} refused by the server", out.refused));
                 }
                 if !out.conflicts.is_empty() {
-                    self.notify(format!("{} item(s) were replaced by a newer version from another device", out.conflicts.len()), crate::ui::AMBER);
+                    self.notify(format!("{} item(s) were replaced by a newer version from another device", out.conflicts.len()), crate::ui::AMBER());
                 }
             }
             Err(e) => {

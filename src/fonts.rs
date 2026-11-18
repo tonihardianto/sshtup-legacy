@@ -103,9 +103,40 @@ pub fn term(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name("term".into()))
 }
 
-/// Makes the `term` family use `name` (empty, or a font that cannot be read: Hack). Returns false when the font could not be loaded.
-pub fn apply(ctx: &egui::Context, name: &str) -> bool {
+static INTER: &[u8] = include_bytes!("../assets/fonts/Inter.ttf");
+static DM_SANS: &[u8] = include_bytes!("../assets/fonts/DMSans.ttf");
+
+/// The choices for the app's own font: setting value and name shown.
+pub const UI_FONTS: &[(&str, &str)] = &[("inter", "Inter"), ("dmsans", "DM Sans"), ("system", "System"), ("default", "Classic")];
+
+/// The font the operating system uses for its own interface, if it can be found.
+fn system_ui_font() -> Option<Vec<u8>> {
+    let files: &[&str] = if cfg!(target_os = "macos") {
+        &["SFNS.ttf", "HelveticaNeue.ttc"]
+    } else if cfg!(target_os = "windows") {
+        &["segoeui.ttf"]
+    } else {
+        &["NotoSans-Regular.ttf", "Ubuntu-R.ttf", "DejaVuSans.ttf"]
+    };
+    let depth = if cfg!(any(target_os = "macos", target_os = "windows")) { 0 } else { 3 };
+    let dirs = font_dirs();
+    files.iter().find_map(|f| dirs.iter().find_map(|d| find_in(d, f, depth))).and_then(|p| std::fs::read(p).ok())
+}
+
+/// Makes the `term` family use `name` (empty, or a font that cannot be read: Hack) and the app's own text use `ui`
+/// (see `UI_FONTS`). Returns false when the terminal font could not be loaded.
+pub fn apply(ctx: &egui::Context, name: &str, ui: &str) -> bool {
     let mut defs = FontDefinitions::default();
+    let ui_bytes: Option<Vec<u8>> = match ui {
+        "default" => None,
+        "dmsans" => Some(DM_SANS.to_vec()),
+        "system" => system_ui_font().or_else(|| Some(INTER.to_vec())),
+        _ => Some(INTER.to_vec()),
+    };
+    if let Some(b) = ui_bytes {
+        defs.font_data.insert("ui-font".into(), Arc::new(FontData::from_owned(b)));
+        defs.families.entry(FontFamily::Proportional).or_default().insert(0, "ui-font".into());
+    }
     let mut family: Vec<String> = defs.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
     let mut ok = true;
     if !name.is_empty() {
