@@ -5,6 +5,10 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+## 0.2.1
+
+- Dependencies: axum 0.8, rusqlite 0.42, x25519-dalek 3, chacha20poly1305 0.11, base64 0.23 and newer GitHub Actions.
+  The sync server routes and the encryption code were adapted to them; nothing changes for users.
 - Settings: a new layout with a search box, underlined tabs and cards of settings, each with **Reset to defaults**. The
   Terminal tab has a preview that follows every change (the scheme's 16 colors show their names on hover).
 - Terminal: pick the **font** from the monospace fonts installed on the computer (Hack stays built in), set the **line
