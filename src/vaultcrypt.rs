@@ -128,6 +128,33 @@ pub fn decrypt(bytes: &[u8], password: &str) -> Result<(Zeroizing<Vec<u8>>, Vaul
     Ok((Zeroizing::new(pt), VaultKey { key, salt, m_kib, t, p }))
 }
 
+impl VaultKey {
+    /// The derived key itself (for keeping in the system keychain). Anyone who has it can open the vault.
+    pub fn raw(&self) -> Zeroizing<[u8; 32]> {
+        Zeroizing::new(*self.key)
+    }
+}
+
+/// Opens an encrypted vault with a key that was derived earlier (no password, no Argon2).
+pub fn decrypt_with_key(bytes: &[u8], key: &[u8; 32]) -> Result<(Zeroizing<Vec<u8>>, VaultKey), CryptError> {
+    if !bytes.starts_with(MAGIC) {
+        return Err(CryptError::NotEncrypted);
+    }
+    if bytes.len() <= HEADER_LEN + 16 || bytes[6] != VERSION {
+        return Err(CryptError::Corrupt);
+    }
+    let u32_at = |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+    let (m_kib, t, p) = (u32_at(7), u32_at(11), u32_at(15));
+    let mut salt = [0u8; SALT_LEN];
+    salt.copy_from_slice(&bytes[19..19 + SALT_LEN]);
+    let nonce = &bytes[19 + SALT_LEN..HEADER_LEN];
+    let cipher = XChaCha20Poly1305::new(key.into());
+    let pt = cipher
+        .decrypt(XNonce::from_slice(nonce), Payload { msg: &bytes[HEADER_LEN..], aad: &bytes[..HEADER_LEN] })
+        .map_err(|_| CryptError::WrongPassword)?;
+    Ok((Zeroizing::new(pt), VaultKey { key: Zeroizing::new(*key), salt, m_kib, t, p }))
+}
+
 impl Drop for VaultKey {
     fn drop(&mut self) {
         self.salt.zeroize();
@@ -408,6 +435,18 @@ mod tests {
         let b = k.encrypt(b"same").unwrap();
         assert_ne!(a[HEADER_LEN - NONCE_LEN..HEADER_LEN], b[HEADER_LEN - NONCE_LEN..HEADER_LEN]);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_kept_key_opens_the_vault_without_the_password() {
+        let key = VaultKey::with_cost("pw-for-test", 8, 1, 1).unwrap();
+        let bytes = key.encrypt(b"secret").unwrap();
+        let (pt, again) = decrypt_with_key(&bytes, &key.raw()).unwrap();
+        assert_eq!(&pt[..], b"secret");
+        // the reopened key saves in a form the password still opens
+        let (pt2, _) = decrypt(&again.encrypt(b"more").unwrap(), "pw-for-test").unwrap();
+        assert_eq!(&pt2[..], b"more");
+        assert_eq!(decrypt_with_key(&bytes, &[0u8; 32]).err(), Some(CryptError::WrongPassword));
     }
 
     #[test]

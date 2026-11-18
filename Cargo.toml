@@ -24,6 +24,7 @@ sha2 = "0.11"
 base64 = "0.23"
 sync-core = { path = "sync-core" }
 sync-client = { path = "sync-client" }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 # Argon2 is slow without optimisation; keep it fast in debug builds too.
 [profile.dev.package.argon2]

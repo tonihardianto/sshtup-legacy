@@ -20,11 +20,15 @@ pub struct LockState {
     input: String,
     error: Option<String>,
     working: Option<Receiver<Opened>>,
+    /// Keep the vault key in the system keychain after a successful unlock.
+    remember: bool,
+    /// The keychain has been tried this run.
+    auto_tried: bool,
 }
 
 impl LockState {
     pub fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes, input: String::new(), error: None, working: None }
+        Self { bytes, input: String::new(), error: None, working: None, remember: true, auto_tried: false }
     }
 }
 
@@ -35,6 +39,8 @@ pub struct SecurityUi {
     new_pw: String,
     confirm: String,
     message: Option<(String, bool)>,
+    /// Whether the vault key is in the system keychain (None = not looked up yet).
+    remember: Option<bool>,
 }
 
 impl SecurityUi {
@@ -59,6 +65,21 @@ impl App {
 
         // an unlock attempt running on its own thread (Argon2id takes a moment on purpose)
         let mut outcome: Option<Opened> = None;
+        let mut from_keychain = false;
+        // the key kept in the system keychain opens the vault without asking
+        if !lock.auto_tried && !self.demo {
+            lock.auto_tried = true;
+            if let Some(k) = crate::keystore::load() {
+                match vaultcrypt::decrypt_with_key(&lock.bytes, &k) {
+                    Ok(r) => {
+                        outcome = Some(Ok(r));
+                        from_keychain = true;
+                    }
+                    // the password was changed elsewhere: that key is stale
+                    Err(_) => crate::keystore::forget(),
+                }
+            }
+        }
         if let Some(rx) = &lock.working {
             match rx.try_recv() {
                 Ok(r) => outcome = Some(r),
@@ -74,6 +95,9 @@ impl App {
             match r {
                 Ok((json, key)) => match serde_json::from_slice::<Vault>(&json) {
                     Ok(v) => {
+                        if lock.remember && !from_keychain && !self.demo {
+                            crate::keystore::save(&key.raw());
+                        }
                         self.vault = v;
                         self.vault_key = Some(key);
                         self.lock = None;
@@ -126,7 +150,9 @@ impl App {
                         ui.add_space(6.0);
                         ui.label(RichText::new(e).size(12.0).color(RED));
                     }
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
+                    ui.add_enabled(!busy, egui::Checkbox::new(&mut lock.remember, RichText::new("Keep me unlocked on this device").size(12.0).color(MUTED)));
+                    ui.add_space(8.0);
                     if busy {
                         ui.label(RichText::new("Opening…").size(12.5).color(MUTED));
                     } else {
@@ -185,6 +211,23 @@ impl App {
         } else {
             ui.label(RichText::new("The vault, the session logs and the command history are encrypted with your master password.").size(12.0).color(GREEN));
             ui.add_space(6.0);
+            let mut remember = *su.remember.get_or_insert_with(|| crate::keystore::load().is_some());
+            if ui.checkbox(&mut remember, RichText::new("Unlock automatically on this device").size(12.5)).changed() {
+                let ok = if remember { self.vault_key.as_ref().map(|k| crate::keystore::save(&k.raw())).unwrap_or(false) } else {
+                    crate::keystore::forget();
+                    true
+                };
+                su.remember = Some(if ok { remember } else { false });
+                su.message = Some(if !ok {
+                    ("Could not use the system keychain.".into(), false)
+                } else if remember {
+                    ("The key is kept in the system keychain. The app opens without the master password on this device.".into(), true)
+                } else {
+                    ("The master password is asked for every time the app opens.".into(), true)
+                });
+            }
+            ui.label(RichText::new("The key is kept in the system keychain, guarded by your computer login.").size(11.5).color(MUTED));
+            ui.add_space(8.0);
             password_field(ui, &mut su.current, "Current password");
             password_field(ui, &mut su.new_pw, "New password (to change it)");
             password_field(ui, &mut su.confirm, "Repeat the new password");
@@ -227,6 +270,9 @@ impl App {
                             }
                         }
                         if self.vault.log_key.is_some() && save_vault(&self.vault, Some(&key)) {
+                            if self.sec.remember == Some(true) || (encrypted && crate::keystore::load().is_some()) {
+                                crate::keystore::save(&key.raw());
+                            }
                             self.vault_key = Some(key);
                             self.sec.clear();
                             let mut msg = if encrypted { "Password changed.".to_string() } else { "The vault is now encrypted.".to_string() };
@@ -278,6 +324,8 @@ impl App {
                     let old = self.vault.log_key.take();
                     if save_vault(&self.vault, None) {
                         self.vault_key = None;
+                        crate::keystore::forget();
+                        self.sec.remember = None;
                         self.sec.clear();
                         self.sec.message = Some(("Encryption removed. The vault, the logs and the command history are stored as plain text again.".into(), true));
                     } else {
