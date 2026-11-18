@@ -226,6 +226,8 @@ struct Transfer {
     total: Option<u64>,
     /// Where finished bytes can be counted: the local folder the files are written to (downloads only).
     watch: Option<(String, Vec<String>)>,
+    /// Uploads: bytes seen on the host, filled in by a background thread that asks the host for the file sizes.
+    remote: Option<(Arc<std::sync::atomic::AtomicU64>, Arc<std::sync::atomic::AtomicBool>)>,
     started: std::time::Instant,
     done_bytes: u64,
     speed: f64,
@@ -239,11 +241,21 @@ impl Transfer {
         self.end.is_none()
     }
 
+    /// True when the bytes that have moved can be counted (so there is a real percentage).
+    fn measured(&self) -> bool {
+        self.watch.is_some() || self.remote.is_some()
+    }
+
     /// Measures how much has arrived so far and smooths the speed.
     fn tick(&mut self) {
-        let Some((dir, names)) = &self.watch else { return };
+        let got: u64 = if let Some((n, _)) = &self.remote {
+            n.load(std::sync::atomic::Ordering::Relaxed)
+        } else if let Some((dir, names)) = &self.watch {
+            names.iter().map(|n| std::fs::metadata(join(dir, n)).map(|m| m.len()).unwrap_or(0)).sum()
+        } else {
+            return;
+        };
         let now = std::time::Instant::now();
-        let got: u64 = names.iter().map(|n| std::fs::metadata(join(dir, n)).map(|m| m.len()).unwrap_or(0)).sum();
         self.done_bytes = self.total.map_or(got, |t| got.min(t));
         let dt = now.duration_since(self.last_tick.0).as_secs_f64();
         if dt >= 0.5 {
@@ -281,6 +293,8 @@ pub struct SftpState {
     busy: Option<String>,
     prompt: Option<Prompt>,
     confirm_del: Option<(Side, Vec<String>)>,
+    /// A transfer that would replace files already in the destination: (from, names, those that already exist, destination name).
+    confirm_over: Option<(Side, Vec<String>, Vec<String>, String)>,
     seeded: bool,
     connect_started: Option<std::time::Instant>,
 }
@@ -456,6 +470,28 @@ fn run_ssh(cfg: &RemoteCfg, script: &str) -> Result<String, String> {
     } else {
         Err(clean_err(&out.stderr, "The connection failed"))
     }
+}
+
+/// Every moment or so, asks the host how many bytes the given files hold and keeps the sum in the returned counter.
+/// The thread stops when the flag is set or when nobody holds the counter any more.
+fn spawn_size_poll(cfg: Arc<RemoteCfg>, paths: Vec<String>) -> (Arc<std::sync::atomic::AtomicU64>, Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    let bytes = Arc::new(AtomicU64::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let (b, st) = (bytes.clone(), stop.clone());
+    std::thread::spawn(move || {
+        // `wc -c` reads the size without reading the file; a file that is not there yet counts as 0
+        let script: String = paths.iter().map(|p| format!("wc -c < {} 2>/dev/null || echo 0; ", q(p))).collect();
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        while !st.load(Ordering::Relaxed) && Arc::strong_count(&b) > 1 {
+            if let Ok(out) = run_ssh(&cfg, &script) {
+                let sum: u64 = out.lines().filter_map(|l| l.trim().parse::<u64>().ok()).sum();
+                b.store(sum, Ordering::Relaxed);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(700));
+        }
+    });
+    (bytes, stop)
 }
 
 fn run_sftp(cfg: &RemoteCfg, batch: &str) -> Result<(), String> {
@@ -926,10 +962,15 @@ impl SftpState {
         let title = if names.len() == 1 { names[0].clone() } else { format!("{} items", names.len()) };
         // downloads to this computer can be measured by the size of the files that are arriving
         let watch = if from == Side::Remote && self.lcfg.is_none() && total.is_some() { Some((self.local.path.clone(), names.to_vec())) } else { None };
+        // uploads to a host: ask the host how big the files have become
+        let remote = match (&self.cfg, from == Side::Local && self.lcfg.is_none() && total.is_some()) {
+            (Some(cfg), true) => Some(spawn_size_poll(cfg.clone(), names.iter().map(|n| join(&self.remote.path, n)).collect())),
+            _ => None,
+        };
         let now = std::time::Instant::now();
         self.next_transfer += 1;
         let id = self.next_transfer;
-        self.transfers.push(Transfer { id, title, route, total, watch, started: now, done_bytes: 0, speed: 0.0, last_tick: (now, 0), end: None });
+        self.transfers.push(Transfer { id, title, route, total, watch, remote, started: now, done_bytes: 0, speed: 0.0, last_tick: (now, 0), end: None });
         self.cur_transfer = Some(id);
         self.transfers_collapsed = false;
         // keep the list short: drop the oldest finished rows
@@ -945,6 +986,9 @@ impl SftpState {
     fn end_transfer(&mut self, ok: bool, msg: &str) {
         let Some(id) = self.cur_transfer.take() else { return };
         if let Some(t) = self.transfers.iter_mut().find(|t| t.id == id) {
+            if let Some((_, stop)) = &t.remote {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             t.tick();
             if ok {
                 if let Some(total) = t.total {
@@ -1584,7 +1628,7 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                 // numbers: bytes, speed, time left
                 let el = t.end.as_ref().map_or(t.started.elapsed(), |(at, _)| at.duration_since(t.started)).as_secs_f64();
                 let info = match (&t.end, t.total) {
-                    (None, Some(total)) if t.watch.is_some() => {
+                    (None, Some(total)) if t.measured() => {
                         let mut v = format!("{} / {}", fmt_sz(t.done_bytes), fmt_sz(total));
                         if t.speed > 1.0 {
                             v.push_str(&format!("  ·  {}/s", fmt_sz(t.speed as u64)));
@@ -1615,8 +1659,8 @@ fn draw_transfers(ui: &mut egui::Ui, rect: Rect, s: &mut SftpState) {
                 // bar
                 p.rect_filled(bar_r, 3.0, Color32::from_rgb(0x2A, 0x2E, 0x44));
                 let (frac, col, state) = match &t.end {
-                    None => match (t.total, &t.watch) {
-                        (Some(total), Some(_)) if total > 0 => {
+                    None => match (t.total, t.measured()) {
+                        (Some(total), true) if total > 0 => {
                             let f = (t.done_bytes as f32 / total as f32).clamp(0.0, 1.0);
                             (Some(f), BLUE, format!("{}%", (f * 100.0).floor() as u32))
                         }
@@ -1889,18 +1933,19 @@ impl App {
                 } else if s.busy.is_some() {
                     self.notify("Wait for the current transfer to finish".into(), AMBER);
                 } else {
-                    let n = names.len();
-                    let rl = s.host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "host".into());
-                    let ll = s.left_host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "This computer".into());
-                    let (lp, rp) = (s.local.path.clone(), s.remote.path.clone());
-                    let route = if side == Side::Local { format!("{}:{} → {}:{}", ll, lp, rl, rp) } else { format!("{}:{} → {}:{}", rl, rp, ll, lp) };
-                    let tn = names.clone();
-                    if side == Side::Local {
-                        s.start_op(Op::Upload(names), &format!("Uploading {}…", n), ctx);
+                    // files with the same name in the other pane would be replaced: ask first
+                    let dst = if side == Side::Local { &s.remote } else { &s.local };
+                    let clash: Vec<String> = names.iter().filter(|n| dst.entries.iter().any(|e| &e.name == *n)).cloned().collect();
+                    if clash.is_empty() {
+                        self.run_transfer(side, names, ctx);
                     } else {
-                        s.start_op(Op::Download(names), &format!("Downloading {}…", n), ctx);
+                        let dname = if side == Side::Local {
+                            s.host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "the host".into())
+                        } else {
+                            s.left_host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "this computer".into())
+                        };
+                        s.confirm_over = Some((side, names, clash, dname));
                     }
-                    s.begin_transfer(side, &tn, route);
                 }
             }
             SAct::OpenFile(choice) => {
@@ -1975,6 +2020,26 @@ impl App {
         }
     }
 
+    /// Starts an upload (from the left pane) or a download (from the right pane) of the given names.
+    fn run_transfer(&mut self, side: Side, names: Vec<String>, ctx: &egui::Context) {
+        let s = &mut self.sftp;
+        if names.is_empty() || s.busy.is_some() {
+            return;
+        }
+        let n = names.len();
+        let rl = s.host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "host".into());
+        let ll = s.left_host.and_then(|id| self.vault.host(Some(id))).map(|h| h.display_label()).unwrap_or_else(|| "This computer".into());
+        let (lp, rp) = (s.local.path.clone(), s.remote.path.clone());
+        let route = if side == Side::Local { format!("{}:{} → {}:{}", ll, lp, rl, rp) } else { format!("{}:{} → {}:{}", rl, rp, ll, lp) };
+        let tn = names.clone();
+        if side == Side::Local {
+            s.start_op(Op::Upload(names), &format!("Uploading {}…", n), ctx);
+        } else {
+            s.start_op(Op::Download(names), &format!("Downloading {}…", n), ctx);
+        }
+        s.begin_transfer(side, &tn, route);
+    }
+
     fn sftp_dialogs(&mut self, ctx: &egui::Context) {
         // name prompt (new folder / rename)
         let mut finish: Option<bool> = None;
@@ -2007,6 +2072,41 @@ impl App {
                     self.sftp.start_op(Op::Rename(p.side, old, name), "Renaming…", ctx);
                 } else {
                     self.sftp.start_op(Op::Mkdir(p.side, name), "Creating folder…", ctx);
+                }
+            }
+        }
+
+        // replace confirmation: Some(true) replaces, Some(false) skips the existing ones, None keeps waiting
+        let mut over: Option<Option<bool>> = None;
+        if let Some((_, names, clash, dest)) = &self.sftp.confirm_over {
+            let msg = if clash.len() == 1 { format!("\"{}\" already exists in {}.", clash[0], dest) } else { format!("{} of these items already exist in {}.", clash.len(), dest) };
+            let rest = names.len() > clash.len();
+            let (_, closed) = app_modal(ctx, "sftp_overwrite_modal", "Replace existing?", |ui| {
+                ui.set_width(340.0);
+                ui.label(msg);
+                ui.label(RichText::new("Replacing overwrites what is there now. This cannot be undone.").size(12.0).color(MUTED));
+                modal_buttons(ui, |ui| {
+                    if danger_button(ui, "Replace").clicked() {
+                        over = Some(Some(true));
+                    }
+                    if rest && flat_button(ui, "Skip existing").clicked() {
+                        over = Some(Some(false));
+                    }
+                    if flat_button(ui, "Cancel").clicked() {
+                        over = Some(None);
+                    }
+                });
+            });
+            if closed {
+                over = Some(None);
+            }
+        }
+        if let Some(choice) = over {
+            if let Some((side, names, clash, _)) = self.sftp.confirm_over.take() {
+                match choice {
+                    Some(true) => self.run_transfer(side, names, ctx),
+                    Some(false) => self.run_transfer(side, names.into_iter().filter(|n| !clash.contains(n)).collect(), ctx),
+                    None => {}
                 }
             }
         }
@@ -2073,6 +2173,9 @@ impl App {
                     self.sftp.local = p;
                 }
             }
+            if std::env::var("SSHTUP_DEMO_OVERWRITE").is_ok() {
+                self.sftp.confirm_over = Some((Side::Local, vec!["config.json".into(), "readme.md".into()], vec!["config.json".into()], "web-01".into()));
+            }
             if std::env::var("SSHTUP_DEMO_DRAG").is_ok() {
                 self.sftp.drag = Some(Side::Local);
             }
@@ -2090,6 +2193,7 @@ impl App {
                     route: format!("{}:/var/www/site → This computer:/Users/demo/Projects", host),
                     total: Some(total),
                     watch: Some((String::new(), vec![])),
+                    remote: None,
                     started: ago(started),
                     done_bytes: done,
                     speed,
