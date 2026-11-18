@@ -649,10 +649,24 @@ impl App {
         let mut to_close = None;
         let mut to_open_local = false;
         let mut collab_act: Option<(u64, crate::collab::CollabAct)> = None;
+        // macOS draws the window buttons on top of this strip: keep the tabs clear of them
+        let (left_pad, strip_h, top_pad) = if cfg!(target_os = "macos") { (84, 48.0, 8) } else { (10, 42.0, 10) };
         egui::Panel::top("tabs")
-            .exact_size(42.0)
-            .frame(Frame::new().fill(BG_WINDOW).inner_margin(Margin { left: 10, right: 10, top: 10, bottom: 0 }))
+            .exact_size(strip_h)
+            .frame(Frame::new().fill(BG_WINDOW).inner_margin(Margin { left: left_pad, right: 10, top: top_pad, bottom: 0 }))
             .show(ui, |ui| {
+                if cfg!(target_os = "macos") {
+                    // the empty part of the strip moves the window (double click zooms it); the tabs are drawn on top of this
+                    let r = egui::Rect::from_min_max(Pos2::new(ui.max_rect().left() - left_pad as f32, ui.max_rect().top() - top_pad as f32), Pos2::new(ui.max_rect().right() + 10.0, ui.max_rect().bottom()));
+                    let drag = ui.interact(r, egui::Id::new("titlebar_drag"), egui::Sense::click_and_drag());
+                    if drag.drag_started() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if drag.double_clicked() {
+                        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                    }
+                }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     let (c, _, _) = tab_button(ui, self.screen.title(), self.active.is_none(), false, None, Some(self.screen.glyph()));
@@ -1214,6 +1228,8 @@ pub fn rgb_c(c: u32) -> Color32 {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        crate::macos_bar::align(_frame);
         let ctx = ui.ctx().clone();
         if self.lock_screen(ui) {
             return;
