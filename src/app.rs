@@ -108,6 +108,22 @@ pub struct TermTab {
     /// Bells already answered (sound or flash), and when the last flash started.
     pub bell_seen: u64,
     pub bell_flash: Option<Instant>,
+    /// This tab is the second pane of another tab (it has no tab of its own in the strip).
+    pub pane_of: Option<u64>,
+    /// A second terminal shown beside (or below) this one.
+    pub split: Option<Split>,
+}
+
+/// A tab cut in two: the tab's own terminal and a second one.
+#[derive(Clone, Copy)]
+pub struct Split {
+    pub second: u64,
+    /// Side by side (true) or one above the other (false).
+    pub side_by_side: bool,
+    /// Share of the room the first terminal takes.
+    pub ratio: f32,
+    /// The keyboard goes to the second terminal.
+    pub second_focused: bool,
 }
 
 pub struct ShotState {
@@ -147,6 +163,8 @@ pub struct App {
     /// The terminal font the `term` font family was last built with.
     pub term_font: String,
     pub host_picker: Option<String>,
+    /// The host picker is choosing the second terminal of this tab (and whether it goes beside or below).
+    pub split_pick: Option<(u64, bool)>,
     pub sftp: crate::sftp::SftpState,
     pub collab: crate::collab::CollabState,
     pub key_import: Option<crate::screens::KeyImport>,
@@ -295,6 +313,7 @@ impl App {
             clear_armed: false,
             term_font,
             host_picker: None,
+            split_pick: None,
             sftp: Default::default(),
             show_snippets_menu: false,
             gen_key_label: String::new(),
@@ -509,7 +528,7 @@ impl App {
             Ok(sess) => {
                 let id = self.next_tab;
                 self.next_tab += 1;
-                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false, bell_seen: 0, bell_flash: None });
+                self.tabs.push(TermTab { id, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false, bell_seen: 0, bell_flash: None, pane_of: None, split: None });
                 self.active = Some(id);
             }
             Err(e) => self.notify(format!("Could not start: {}", e), RED),
@@ -557,8 +576,62 @@ impl App {
         self.toast = Some((msg, Instant::now(), color));
     }
 
+    /// Opens another terminal of the same session next to (or below) tab `id`.
+    /// Asks which host the second terminal of tab `id` should show.
+    pub fn ask_split(&mut self, id: u64, side_by_side: bool) {
+        if self.tabs.iter().find(|t| t.id == id).map(|t| t.split.is_some()).unwrap_or(true) {
+            self.notify("This tab is already split. Close the extra terminal first".into(), AMBER);
+            return;
+        }
+        self.split_pick = Some((id, side_by_side));
+        self.host_picker = Some(String::new());
+    }
+
+    /// Opens the terminal described by `spec` next to (or below) tab `id`; with no spec, the tab's own session again.
+    pub fn split_tab(&mut self, id: u64, side_by_side: bool, spec: Option<SessionSpec>) {
+        let Some(t) = self.tabs.iter().find(|t| t.id == id) else { return };
+        if t.split.is_some() {
+            return;
+        }
+        let mut spec = spec.unwrap_or_else(|| t.sess.spec.clone());
+        if let Some(why) = spec.refused.take() {
+            self.notify(why, RED);
+            return;
+        }
+        crate::model::tighten_known_hosts();
+        spec.log_key = self.log_key();
+        match PtySession::spawn(spec.clone(), self.ctx.clone(), 30, 100) {
+            Ok(sess) => {
+                let second = self.next_tab;
+                self.next_tab += 1;
+                self.tabs.push(TermTab { id: second, title: spec.title.clone(), sess, view: TermViewState::default(), reconnect_at: None, focus_next: true, card_pinned: false, ready: false, pw_text: String::new(), pw_remember: false, bell_seen: 0, bell_flash: None, pane_of: Some(id), split: None });
+                if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+                    t.split = Some(Split { second, side_by_side, ratio: 0.5, second_focused: true });
+                }
+            }
+            Err(e) => self.notify(format!("Could not start: {}", e), RED),
+        }
+    }
+
+    /// Closes the extra terminal of tab `id`.
+    pub fn close_split(&mut self, id: u64) {
+        let second = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.split.map(|s| s.second));
+        if let Some(sec) = second {
+            self.tabs.retain(|t| t.id != sec);
+        }
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+            t.split = None;
+            t.focus_next = true;
+        }
+    }
+
     pub fn close_tab(&mut self, id: u64) {
-        self.tabs.retain(|t| t.id != id);
+        if let Some(owner) = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.pane_of) {
+            self.close_split(owner);
+            return;
+        }
+        let second = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.split.map(|s| s.second));
+        self.tabs.retain(|t| t.id != id && Some(t.id) != second);
         if self.active == Some(id) {
             self.active = self.tabs.last().map(|t| t.id);
         }
@@ -648,6 +721,8 @@ impl App {
     fn tab_bar(&mut self, ui: &mut egui::Ui) {
         let mut to_close = None;
         let mut to_open_local = false;
+        let mut split_req: Option<(u64, Option<bool>)> = None;
+        let mut search_req: Option<u64> = None;
         let mut collab_act: Option<(u64, crate::collab::CollabAct)> = None;
         // macOS draws the window buttons on top of this strip: keep the tabs clear of them
         let (left_pad, strip_h, top_pad) = if cfg!(target_os = "macos") { (84, 48.0, 8) } else { (10, 42.0, 10) };
@@ -676,6 +751,7 @@ impl App {
                     let ids: Vec<(u64, String, Color32)> = self
                         .tabs
                         .iter()
+                        .filter(|t| t.pane_of.is_none())
                         .map(|t| (t.id, t.title.clone(), if t.sess.shared.alive.load(std::sync::atomic::Ordering::Relaxed) { GREEN } else { RED }))
                         .collect();
                     for (id, title, dot) in ids {
@@ -702,6 +778,27 @@ impl App {
                     if plus.on_hover_text("New session").clicked() {
                         to_open_local = true;
                     }
+                    if let Some(id) = self.active {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let split = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.split);
+                            if split.is_some() {
+                                if split_button(ui, SplitIcon::Close, "Close the extra terminal").clicked() {
+                                    split_req = Some((id, None));
+                                }
+                            } else {
+                                if split_button(ui, SplitIcon::Below, "Split down").clicked() {
+                                    split_req = Some((id, Some(false)));
+                                }
+                                if split_button(ui, SplitIcon::Right, "Split right").clicked() {
+                                    split_req = Some((id, Some(true)));
+                                }
+                            }
+                            if split_button(ui, SplitIcon::Search, if cfg!(target_os = "macos") { "Find (Cmd+F)" } else { "Find (Ctrl+Shift+F)" }).clicked() {
+                                let target = split.filter(|s| s.second_focused).map(|s| s.second).unwrap_or(id);
+                                search_req = Some(target);
+                            }
+                        });
+                    }
                 });
             });
         if let Some((id, a)) = collab_act {
@@ -709,6 +806,14 @@ impl App {
         }
         if let Some(id) = to_close {
             self.close_tab(id);
+        }
+        if let Some(t) = self.tabs.iter_mut().find(|t| Some(t.id) == search_req) {
+            t.view.search.get_or_insert_with(Default::default).focus_input = true;
+        }
+        match split_req {
+            Some((id, Some(side))) => self.ask_split(id, side),
+            Some((id, None)) => self.close_split(id),
+            None => {}
         }
         if to_open_local {
             self.host_picker = Some(String::new());
@@ -767,13 +872,13 @@ impl App {
         }
     }
 
-    fn terminal_view(&mut self, ui: &mut egui::Ui, tab_id: u64) {
+    fn terminal_view(&mut self, ui: &mut egui::Ui, tab_id: u64, has_keys: bool) {
         let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else {
             self.active = None;
             return;
         };
         // Cmd/Ctrl + and - change the terminal's font size (instead of zooming the whole window), 0 sets it back.
-        let zoom = ui.input_mut(|i| {
+        let zoom = if !has_keys { None } else { ui.input_mut(|i| {
             use egui::{Key, KeyboardShortcut as K, Modifiers as M};
             if i.consume_shortcut(&K::new(M::COMMAND, Key::Num0)) {
                 Some(0.0)
@@ -784,7 +889,7 @@ impl App {
             } else {
                 None
             }
-        });
+        }) };
         if let Some(step) = zoom {
             let spec_size = &mut self.tabs[idx].sess.spec.font_size;
             // a host with its own size changes for this tab only; otherwise the setting changes (and is saved)
@@ -990,6 +1095,99 @@ impl App {
         let _ = &mut close;
     }
 
+    /// The tab's terminal, or both terminals when the tab is split.
+    fn terminal_area(&mut self, ui: &mut egui::Ui, id: u64) {
+        // keys: Cmd+D splits side by side, Cmd+Shift+D one above the other (Ctrl+Shift+D / Ctrl+Shift+E elsewhere,
+        // because Ctrl+D is end-of-file in a shell)
+        let req = ui.input_mut(|i| {
+            use egui::{Key, KeyboardShortcut as K, Modifiers as M};
+            if cfg!(target_os = "macos") {
+                if i.consume_shortcut(&K::new(M::COMMAND | M::SHIFT, Key::D)) {
+                    Some(false)
+                } else if i.consume_shortcut(&K::new(M::COMMAND, Key::D)) {
+                    Some(true)
+                } else {
+                    None
+                }
+            } else if i.consume_shortcut(&K::new(M::COMMAND | M::SHIFT, Key::D)) {
+                Some(true)
+            } else if i.consume_shortcut(&K::new(M::COMMAND | M::SHIFT, Key::E)) {
+                Some(false)
+            } else {
+                None
+            }
+        });
+        if let Some(side) = req {
+            self.ask_split(id, side);
+        }
+        let Some(split) = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.split) else {
+            self.terminal_view(ui, id, true);
+            return;
+        };
+        if !self.tabs.iter().any(|t| t.id == split.second) {
+            self.close_split(id);
+            self.terminal_view(ui, id, true);
+            return;
+        }
+        let full = ui.available_rect_before_wrap();
+        let gap = 7.0;
+        let (a, b, bar) = if split.side_by_side {
+            let x = (full.left() + full.width() * split.ratio).clamp(full.left() + 160.0, full.right() - 160.0);
+            (
+                egui::Rect::from_min_max(full.min, Pos2::new(x - gap / 2.0, full.bottom())),
+                egui::Rect::from_min_max(Pos2::new(x + gap / 2.0, full.top()), full.max),
+                egui::Rect::from_min_max(Pos2::new(x - gap / 2.0, full.top()), Pos2::new(x + gap / 2.0, full.bottom())),
+            )
+        } else {
+            let y = (full.top() + full.height() * split.ratio).clamp(full.top() + 80.0, full.bottom() - 80.0);
+            (
+                egui::Rect::from_min_max(full.min, Pos2::new(full.right(), y - gap / 2.0)),
+                egui::Rect::from_min_max(Pos2::new(full.left(), y + gap / 2.0), full.max),
+                egui::Rect::from_min_max(Pos2::new(full.left(), y - gap / 2.0), Pos2::new(full.right(), y + gap / 2.0)),
+            )
+        };
+        // a click in a terminal gives it the keys
+        let mut second_focused = split.second_focused;
+        if ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                if a.contains(pos) {
+                    second_focused = false;
+                } else if b.contains(pos) {
+                    second_focused = true;
+                }
+            }
+        }
+        // the divider: drag to resize
+        let dv = ui.interact(bar, egui::Id::new(("split_bar", id)), egui::Sense::drag());
+        let mut ratio = split.ratio;
+        if dv.dragged() {
+            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                ratio = if split.side_by_side { (pos.x - full.left()) / full.width() } else { (pos.y - full.top()) / full.height() };
+                ratio = ratio.clamp(0.1, 0.9);
+            }
+        }
+        if dv.hovered() || dv.dragged() {
+            ui.ctx().set_cursor_icon(if split.side_by_side { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+        }
+        let line = if dv.hovered() || dv.dragged() { BLUE } else { BORDER };
+        let lr = if split.side_by_side { egui::Rect::from_center_size(bar.center(), Vec2::new(1.0, bar.height())) } else { egui::Rect::from_center_size(bar.center(), Vec2::new(bar.width(), 1.0)) };
+        ui.painter().rect_filled(bar, 0.0, BG_WINDOW);
+        ui.painter().rect_filled(lr, 0.0, line);
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
+            t.split = Some(Split { ratio, second_focused, ..split });
+        }
+        for (rect, tid, has_keys) in [(a, id, !second_focused), (b, split.second, second_focused)] {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.set_clip_rect(rect);
+                self.terminal_view(ui, tid, has_keys);
+            });
+            // a thin mark on the terminal that has the keys
+            if has_keys {
+                ui.painter().rect_stroke(rect.shrink(0.5), 0.0, egui::Stroke::new(1.0, BLUE.linear_multiply(0.55)), egui::StrokeKind::Inside);
+            }
+        }
+    }
+
     fn toasts(&mut self, ctx: &egui::Context) {
         if let Some((msg, t, col)) = self.toast.clone() {
             if t.elapsed() > Duration::from_secs(4) {
@@ -1073,7 +1271,12 @@ impl App {
             let mut query = self.host_picker.clone().unwrap_or_default();
             let m = egui::Modal::new(egui::Id::new("host_picker_modal")).frame(egui::Frame::popup(&ctx.global_style()).inner_margin(Margin::symmetric(28, 24))).show(ctx, |ui| {
                 ui.set_width(380.0);
-                ui.label(RichText::new("New session").size(15.0).strong().color(TEXT));
+                let title = match self.split_pick {
+                    Some((_, true)) => "Split right: choose a host",
+                    Some((_, false)) => "Split down: choose a host",
+                    None => "New session",
+                };
+                ui.label(RichText::new(title).size(15.0).strong().color(TEXT));
                 ui.add_space(8.0);
                 let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search hosts").desired_width(f32::INFINITY).margin(Vec2::new(10.0, 8.0)));
                 if !r.has_focus() && query.is_empty() {
@@ -1111,15 +1314,26 @@ impl App {
             });
             if query == "\u{0}cancel" || m.should_close() {
                 self.host_picker = None;
+                self.split_pick = None;
             } else {
                 self.host_picker = Some(query);
                 if let Some(p) = pick {
                     self.host_picker = None;
-                    match p {
-                        Some(id) => self.connect_host(id),
-                        None => {
-                            let spec = self.local_spec();
-                            self.open_session(spec);
+                    if let Some((tab, side)) = self.split_pick.take() {
+                        let spec = match p {
+                            Some(id) => self.vault.host(Some(id)).cloned().map(|h| self.spec_for_host(&h)),
+                            None => Some(self.local_spec()),
+                        };
+                        if let Some(spec) = spec {
+                            self.split_tab(tab, side, Some(spec));
+                        }
+                    } else {
+                        match p {
+                            Some(id) => self.connect_host(id),
+                            None => {
+                                let spec = self.local_spec();
+                                self.open_session(spec);
+                            }
                         }
                     }
                 }
@@ -1257,7 +1471,7 @@ impl eframe::App for App {
         self.tab_bar(ui);
         match self.active {
             Some(id) => {
-                egui::CentralPanel::default().frame(Frame::new().fill(BG_CONTENT)).show(ui, |ui| self.terminal_view(ui, id));
+                egui::CentralPanel::default().frame(Frame::new().fill(BG_CONTENT)).show(ui, |ui| self.terminal_area(ui, id));
             }
             None => {
                 self.sidebar(ui);

@@ -464,6 +464,173 @@ pub struct TermViewState {
     pub selection: Option<((u16, u16), (u16, u16))>,
     pub dragging: bool,
     pub ac: crate::autocomplete::AcState,
+    /// The search bar (None = closed).
+    pub search: Option<SearchState>,
+}
+
+/// Find-in-terminal: the text looked for and where it was found, over the screen and the lines scrolled out of it.
+#[derive(Default)]
+pub struct SearchState {
+    pub query: String,
+    /// (line counted from the oldest line kept, first column, last column), in reading order.
+    pub matches: Vec<(usize, u16, u16)>,
+    pub cur: usize,
+    /// The text changed: look again and go to the best match.
+    pub new_query: bool,
+    /// Go to the current match (scroll to it).
+    pub jump: bool,
+    pub focus_input: bool,
+    last_bytes: usize,
+    last_scan: Option<Instant>,
+}
+
+fn row_chars(screen: &vt100::Screen, r: u16, cols: u16, fold: bool) -> Vec<(u16, char)> {
+    let mut v = Vec::with_capacity(cols as usize);
+    for c in 0..cols {
+        if let Some(cell) = screen.cell(r, c) {
+            if cell.is_wide_continuation() {
+                continue;
+            }
+            let ch = if cell.has_contents() { cell.contents().chars().next().unwrap_or(' ') } else { ' ' };
+            v.push((c, if fold { ch.to_lowercase().next().unwrap_or(ch) } else { ch }));
+        }
+    }
+    v
+}
+
+/// The most lines the view can be scrolled back (leaves the view where it was).
+fn max_back(sess: &PtySession) -> usize {
+    let Ok(mut p) = sess.parser.lock() else { return 0 };
+    let cur = p.screen().scrollback();
+    p.screen_mut().set_scrollback(usize::MAX);
+    let max = p.screen().scrollback();
+    p.screen_mut().set_scrollback(cur);
+    max
+}
+
+/// Looks for `query` in every line (smart case: capitals in the query make it case sensitive).
+fn scan(sess: &PtySession, query: &str) -> Vec<(usize, u16, u16)> {
+    let fold = query == query.to_lowercase();
+    let q: Vec<char> = if fold { query.to_lowercase().chars().collect() } else { query.chars().collect() };
+    if q.is_empty() {
+        return vec![];
+    }
+    let Ok(mut p) = sess.parser.lock() else { return vec![] };
+    let keep = p.screen().scrollback();
+    p.screen_mut().set_scrollback(usize::MAX);
+    let max = p.screen().scrollback();
+    let (rows, cols) = {
+        let (r, c) = p.screen().size();
+        (r.get() as usize, c.get())
+    };
+    let mut lines: Vec<Option<Vec<(u16, char)>>> = vec![None; max + rows];
+    let mut off = 0usize;
+    loop {
+        p.screen_mut().set_scrollback(off);
+        let top = max - off.min(max);
+        for r in 0..rows {
+            let abs = top + r;
+            if abs < lines.len() && lines[abs].is_none() {
+                lines[abs] = Some(row_chars(p.screen(), r as u16, cols, fold));
+            }
+        }
+        if off >= max {
+            break;
+        }
+        off = (off + rows).min(max);
+    }
+    p.screen_mut().set_scrollback(keep);
+    let mut out = vec![];
+    for (abs, line) in lines.iter().enumerate() {
+        let Some(line) = line else { continue };
+        let mut i = 0;
+        while i + q.len() <= line.len() {
+            if line[i..i + q.len()].iter().map(|x| x.1).eq(q.iter().copied()) {
+                out.push((abs, line[i].0, line[i + q.len() - 1].0));
+                i += q.len();
+            } else {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Scrolls the view so line `abs` sits in the middle.
+fn show_line(sess: &PtySession, abs: usize) {
+    let Ok(mut p) = sess.parser.lock() else { return };
+    p.screen_mut().set_scrollback(usize::MAX);
+    let max = p.screen().scrollback();
+    let rows = p.screen().size().0.get() as usize;
+    let top = abs.saturating_sub(rows / 2);
+    p.screen_mut().set_scrollback(max.saturating_sub(top));
+}
+
+/// The search bar. Returns true when it should close.
+fn search_bar(ctx: &egui::Context, id: egui::Id, rect: Rect, s: &mut SearchState) -> bool {
+    use crate::ui::{BORDER, CARD_HOVER, MUTED, RED, TEXT};
+    let mut close = false;
+    let w = (rect.width() - 24.0).clamp(200.0, 400.0);
+    egui::Area::new(id.with("bar")).order(egui::Order::Foreground).fixed_pos(Pos2::new(rect.center().x - w / 2.0, rect.top() + 8.0)).show(ctx, |ui| {
+        egui::Frame::new().fill(CARD_HOVER).stroke(Stroke::new(1.0, BORDER)).corner_radius(8).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
+            ui.set_width(w - 16.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let status = if s.query.is_empty() {
+                    String::new()
+                } else if s.matches.is_empty() {
+                    "No results".to_string()
+                } else {
+                    format!("{} of {}", s.cur + 1, s.matches.len())
+                };
+                let text_w = (w - 16.0 - 3.0 * 28.0 - 70.0 - 16.0).max(60.0);
+                let r = ui.add(egui::TextEdit::singleline(&mut s.query).id(id.with("input")).hint_text("Find").desired_width(text_w).margin(Vec2::new(6.0, 4.0)));
+                if s.focus_input {
+                    r.request_focus();
+                    s.focus_input = false;
+                }
+                if r.changed() {
+                    s.new_query = true;
+                }
+                let (enter, shift, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.modifiers.shift, i.key_pressed(Key::Escape)));
+                let mut dir = 0i32; // -1 = older match, 1 = newer
+                if r.lost_focus() && enter {
+                    dir = if shift { 1 } else { -1 };
+                    r.request_focus();
+                }
+                if r.has_focus() && esc {
+                    close = true;
+                }
+                let (txt, col) = if status == "No results" { (status.as_str(), RED) } else { (status.as_str(), MUTED) };
+                ui.add_sized([70.0, 20.0], egui::Label::new(egui::RichText::new(txt).size(11.5).color(col)));
+                for (ic, tip, d) in [(crate::icons::Icon::ChevUp, "Previous (Shift+Enter)", 1), (crate::icons::Icon::ChevDown, "Next (Enter)", -1)] {
+                    let (b, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                    if resp.hovered() {
+                        ui.painter().rect_filled(b, 5.0, crate::ui::CARD);
+                    }
+                    crate::icons::paint(ui.painter(), b.center(), 14.0, ic, if resp.hovered() { TEXT } else { MUTED });
+                    if resp.on_hover_text(tip).clicked() {
+                        // ▲ goes to the older match (up the screen), ▼ to the newer
+                        dir = if d == 1 { -1 } else { 1 };
+                    }
+                }
+                let (b, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(b, 5.0, crate::ui::CARD);
+                }
+                crate::icons::paint(ui.painter(), b.center(), 12.0, crate::icons::Icon::Close, if resp.hovered() { TEXT } else { MUTED });
+                if resp.on_hover_text("Close (Esc)").clicked() {
+                    close = true;
+                }
+                if dir != 0 && !s.matches.is_empty() {
+                    let n = s.matches.len() as i32;
+                    s.cur = ((s.cur as i32 + dir).rem_euclid(n)) as usize;
+                    s.jump = true;
+                }
+            });
+        });
+    });
+    close
 }
 
 /// The size of one terminal cell, and how far down in it the glyphs start (rows taller than the font centre their text).
@@ -609,6 +776,14 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
         }
     }
 
+    // ----- find: Cmd+F (Ctrl+Shift+F elsewhere, since Ctrl+F belongs to the shell)
+    if focused {
+        let m = if cfg!(target_os = "macos") { egui::Modifiers::COMMAND } else { egui::Modifiers::COMMAND | egui::Modifiers::SHIFT };
+        if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(m, Key::F))) {
+            st.search.get_or_insert_with(Default::default).focus_input = true;
+        }
+    }
+
     // ----- keyboard
     if focused {
         let events = ui.input(|i| i.events.clone());
@@ -694,6 +869,48 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
     if st.ac.typed_at.map(|t| t.elapsed() < Duration::from_millis(900)).unwrap_or(false) {
         ui.ctx().request_repaint_after(Duration::from_millis(120));
     }
+
+    // ----- find: the bar, then the matches
+    if st.search.is_some() {
+        let close = search_bar(ui.ctx(), focus_id, rect, st.search.as_mut().unwrap());
+        if close {
+            st.search = None;
+            ui.memory_mut(|m| m.request_focus(focus_id));
+        }
+    }
+    let mut max_now = 0usize;
+    if let Some(sr) = st.search.as_mut() {
+        let bytes = sess.shared.bytes.load(Ordering::Relaxed);
+        let stale = sr.last_bytes != bytes && sr.last_scan.map(|t| t.elapsed() > Duration::from_millis(300)).unwrap_or(true);
+        if sr.new_query || stale {
+            let keep = sr.matches.get(sr.cur).copied();
+            sr.matches = scan(sess, &sr.query);
+            sr.last_bytes = bytes;
+            sr.last_scan = Some(Instant::now());
+            if sr.new_query {
+                // start with the match nearest the end of the output
+                sr.cur = sr.matches.len().saturating_sub(1);
+                sr.jump = !sr.matches.is_empty();
+                sr.new_query = false;
+            } else if let Some(k) = keep {
+                sr.cur = sr.matches.iter().position(|m| *m == k).unwrap_or_else(|| sr.cur.min(sr.matches.len().saturating_sub(1)));
+            }
+        }
+        if sr.last_bytes != bytes {
+            ui.ctx().request_repaint_after(Duration::from_millis(320));
+        }
+        if sr.jump {
+            sr.jump = false;
+            if let Some(m) = sr.matches.get(sr.cur) {
+                show_line(sess, m.0);
+            }
+        }
+        if !sr.matches.is_empty() {
+            max_now = max_back(sess);
+        }
+    }
+    let hit_color = Color32::from_rgba_unmultiplied(255, 200, 40, 90);
+    let cur_hit_color = Color32::from_rgba_unmultiplied(255, 140, 20, 190);
 
     // ----- paint cells
     let parser = sess.parser.lock().unwrap();
@@ -794,6 +1011,15 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
             }
             let _ = text;
         }
+        // search matches
+        if let Some(sr) = &st.search {
+            let abs = max_now.saturating_sub(screen.scrollback()) + r as usize;
+            let first = sr.matches.partition_point(|m| m.0 < abs);
+            for (i, m) in sr.matches.iter().enumerate().skip(first).take_while(|(_, m)| m.0 == abs) {
+                let p = origin_of(r, m.1.min(cols - 1));
+                painter.rect_filled(Rect::from_min_size(p, Vec2::new((m.2.saturating_sub(m.1) + 1) as f32 * cs.x, cs.y)), 2.0, if i == sr.cur { cur_hit_color } else { hit_color });
+            }
+        }
         // selection highlight
         if let Some((a, b)) = sel {
             if r >= a.0 && r <= b.0 {
@@ -856,7 +1082,7 @@ pub fn terminal_ui(ui: &mut egui::Ui, id: egui::Id, sess: &mut PtySession, st: &
     // scrollback indicator
     if screen.scrollback() > 0 {
         let txt = format!("↑ {} lines back", screen.scrollback());
-        let pos = Pos2::new(rect.right() - 12.0, rect.top() + 8.0);
+        let pos = Pos2::new(rect.right() - 12.0, rect.top() + if st.search.is_some() { 52.0 } else { 8.0 });
         let g = painter.layout_no_wrap(txt, FontId::proportional(12.0), Color32::WHITE);
         let rr = Rect::from_min_size(Pos2::new(pos.x - g.size().x - 10.0, pos.y), g.size() + Vec2::new(16.0, 8.0));
         painter.rect_filled(rr, 6.0, Color32::from_black_alpha(170));

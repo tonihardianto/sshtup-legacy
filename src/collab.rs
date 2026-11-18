@@ -238,7 +238,7 @@ impl App {
 
         page_header(ui, "Collaboration", |_| {});
 
-        let tabs: Vec<(u64, String)> = self.tabs.iter().map(|t| (t.id, t.title.clone())).collect();
+        let tabs: Vec<(u64, String)> = self.tabs.iter().filter(|t| t.pane_of.is_none()).map(|t| (t.id, t.title.clone())).collect();
         let synced_for_relay = self.vault.sync.is_some();
         let mut join_go = false;
         if !self.collab.shares.is_empty() {
