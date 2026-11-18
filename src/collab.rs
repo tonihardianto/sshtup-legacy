@@ -55,14 +55,13 @@ impl Share {
 
 impl CollabState {
     /// The people in a shared terminal, for the avatars on its tab: the host first, then the guests.
-    pub fn people(&self, tab_id: u64) -> Vec<(String, egui::Color32)> {
+    pub fn people(&self, tab_id: u64, me: String) -> Vec<(String, egui::Color32)> {
         let Some(s) = self.shares.iter().find(|s| s.tab_id == tab_id) else { return vec![] };
         let Some(l) = &s.link else { return vec![] };
         let st = l.state.lock().unwrap();
         if st.status != Status::Live {
             return vec![];
         }
-        let me = std::env::var("USER").unwrap_or_else(|_| "you".into());
         let mut v = vec![(me, BLUE)];
         for g in st.guests.iter().take(3) {
             let c = guest_color(g.gid);
@@ -150,6 +149,15 @@ fn make_code(seed: u64) -> String {
 }
 
 impl App {
+    /// How this person is shown to the others in a shared terminal: the name they gave, else the system user.
+    pub fn my_name(&self, fallback: &str) -> String {
+        let n = self.vault.settings.user_name.trim();
+        if !n.is_empty() {
+            return n.to_string();
+        }
+        std::env::var("USER").unwrap_or_else(|_| fallback.into())
+    }
+
     pub fn collab_apply(&mut self, ui: &egui::Ui, tab_id: u64, act: CollabAct) {
         match act {
             CollabAct::None => {}
@@ -189,7 +197,7 @@ impl App {
             self.notify("Turn on Sync first: shared terminals use your Sync account and the relay of your Sync server.".into(), AMBER);
             return;
         };
-        let link = self.tabs.iter().find(|t| t.id == tab_id).map(|t| start_host(cfg.server, cfg.token, t.sess.parser.clone(), t.sess.writer_handle(), t.sess.shared.clone(), self.ctx.clone()));
+        let link = self.tabs.iter().find(|t| t.id == tab_id).map(|t| start_host(cfg.server, cfg.token, t.sess.parser.clone(), t.sess.writer_handle(), t.sess.shared.clone(), self.ctx.clone(), self.my_name("host")));
         let msg = if link.is_some() { "Sharing started. Guests join with the session code" } else { "That terminal is gone" };
         self.collab.shares.push(Share { tab_id, local_code: make_code(tab_id), started: now_secs(), link });
         self.notify(msg.into(), if self.collab.shares.last().map(|s| s.link.is_some()).unwrap_or(false) { GREEN } else { AMBER });
@@ -217,7 +225,7 @@ impl App {
             self.notify("Could not start the guest view".into(), RED);
             return;
         };
-        let name = std::env::var("USER").unwrap_or_else(|_| "guest".into());
+        let name = self.my_name("guest");
         let mut spec = self.local_spec();
         spec.title = format!("Shared {code}");
         spec.program = exe.to_string_lossy().into_owned();

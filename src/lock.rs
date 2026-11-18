@@ -36,9 +36,9 @@ impl LockState {
 #[derive(Default)]
 pub struct SecurityUi {
     current: String,
-    new_pw: String,
-    confirm: String,
-    message: Option<(String, bool)>,
+    pub(crate) new_pw: String,
+    pub(crate) confirm: String,
+    pub(crate) message: Option<(String, bool)>,
     /// Whether the vault key is in the system keychain (None = not looked up yet).
     remember: Option<bool>,
 }
@@ -247,6 +247,50 @@ impl App {
         }
 
         if enable || change {
+            self.set_master_password(encrypted);
+        }
+        if remove {
+            if !self.current_password_ok(&self.sec.current) {
+                self.sec.message = Some(("Type the current password to remove encryption.".into(), false));
+            } else if self.tabs.iter().any(|t| t.sess.spec.log_key.is_some()) || self.forwards_live.values().any(|s| s.spec.log_key.is_some()) {
+                // their logs are encrypted with the key that is about to go away
+                self.sec.message = Some(("Close the open terminals first, then remove encryption.".into(), false));
+            } else {
+                // logs first: they need the key that the vault is about to drop
+                let key = self.log_key();
+                let (_, failed) = vaultcrypt::convert_logs(&data_dir().join("logs"), None, key.as_ref(), &[]);
+                self.history.set_key(None);
+                let history_ok = self.history.save();
+                if failed > 0 || !history_ok {
+                    // keep everything encrypted: put the history back under the key if it was not rewritten
+                    if !history_ok {
+                        self.history.set_key(key.clone());
+                        self.history.save();
+                    }
+                    self.sec.message = Some((if failed > 0 { format!("{failed} encrypted log(s) could not be decrypted, so encryption was kept. Nothing was lost.") } else { "The command history could not be rewritten, so encryption was kept. Nothing was lost.".to_string() }, false));
+                } else {
+                    let old = self.vault.log_key.take();
+                    if save_vault(&self.vault, None) {
+                        self.vault_key = None;
+                        crate::keystore::forget();
+                        self.sec.remember = None;
+                        self.sec.clear();
+                        self.sec.message = Some(("Encryption removed. The vault, the logs and the command history are stored as plain text again.".into(), true));
+                    } else {
+                        self.vault.log_key = old;
+                        // the vault is still encrypted: the history goes back under its key
+                        self.history.set_key(key);
+                        self.history.save();
+                        self.sec.message = Some(("Could not write the vault. Nothing was changed.".into(), false));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Encrypts the vault with the password typed in `self.sec` (or changes the password when `encrypted`).
+    /// The result is left in `self.sec.message`.
+    pub fn set_master_password(&mut self, encrypted: bool) {
             let err = if encrypted && !self.current_password_ok(&self.sec.current) {
                 Some("The current password is not correct.")
             } else if self.sec.new_pw.chars().count() < MIN_PASSWORD_LEN {
@@ -301,44 +345,6 @@ impl App {
                 },
             }
         }
-        if remove {
-            if !self.current_password_ok(&self.sec.current) {
-                self.sec.message = Some(("Type the current password to remove encryption.".into(), false));
-            } else if self.tabs.iter().any(|t| t.sess.spec.log_key.is_some()) || self.forwards_live.values().any(|s| s.spec.log_key.is_some()) {
-                // their logs are encrypted with the key that is about to go away
-                self.sec.message = Some(("Close the open terminals first, then remove encryption.".into(), false));
-            } else {
-                // logs first: they need the key that the vault is about to drop
-                let key = self.log_key();
-                let (_, failed) = vaultcrypt::convert_logs(&data_dir().join("logs"), None, key.as_ref(), &[]);
-                self.history.set_key(None);
-                let history_ok = self.history.save();
-                if failed > 0 || !history_ok {
-                    // keep everything encrypted: put the history back under the key if it was not rewritten
-                    if !history_ok {
-                        self.history.set_key(key.clone());
-                        self.history.save();
-                    }
-                    self.sec.message = Some((if failed > 0 { format!("{failed} encrypted log(s) could not be decrypted, so encryption was kept. Nothing was lost.") } else { "The command history could not be rewritten, so encryption was kept. Nothing was lost.".to_string() }, false));
-                } else {
-                    let old = self.vault.log_key.take();
-                    if save_vault(&self.vault, None) {
-                        self.vault_key = None;
-                        crate::keystore::forget();
-                        self.sec.remember = None;
-                        self.sec.clear();
-                        self.sec.message = Some(("Encryption removed. The vault, the logs and the command history are stored as plain text again.".into(), true));
-                    } else {
-                        self.vault.log_key = old;
-                        // the vault is still encrypted: the history goes back under its key
-                        self.history.set_key(key);
-                        self.history.save();
-                        self.sec.message = Some(("Could not write the vault. Nothing was changed.".into(), false));
-                    }
-                }
-            }
-        }
-    }
 
     /// Log files of the sessions that are open right now (they are still being written).
     fn open_log_paths(&self) -> Vec<std::path::PathBuf> {

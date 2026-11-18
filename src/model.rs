@@ -215,6 +215,10 @@ pub struct Settings {
     pub default_editor: String,
     pub autocomplete: bool,
     pub remote_history: bool,
+    /// The welcome screen has been dealt with.
+    pub onboarded: bool,
+    /// What the user told the welcome screen to call them.
+    pub user_name: String,
 }
 
 impl Default for Settings {
@@ -242,6 +246,8 @@ impl Default for Settings {
             default_editor: "system".into(),
             autocomplete: true,
             remote_history: true,
+            onboarded: false,
+            user_name: String::new(),
         }
     }
 }

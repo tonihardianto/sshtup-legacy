@@ -61,6 +61,7 @@ const TERMINAL: &[Group] = &[
 ];
 
 const GENERAL: &[Group] = &[
+    Group { title: "Profile", rows: &[Row { key: "name", title: "Your name", desc: "Shown to the others in a shared terminal", also: "profile collaboration avatar" }] },
     Group {
         title: "Connection",
         rows: &[
@@ -127,7 +128,7 @@ fn differs(s: &Settings, g: &Group) -> bool {
 }
 
 fn resettable(g: &Group) -> bool {
-    g.rows.iter().any(|r| !matches!(r.key, "chist" | "data"))
+    g.rows.iter().any(|r| !matches!(r.key, "chist" | "data" | "name"))
 }
 
 pub fn thousands(n: u64) -> String {
@@ -312,6 +313,7 @@ fn control(ui: &mut egui::Ui, key: &str, cx: &mut RowCtx) {
                 *cx.clear_armed = true;
             }
         }
+        "name" => ch |= ui.add(egui::TextEdit::singleline(&mut s.user_name).hint_text("Your name").desired_width(190.0).margin(Vec2::new(8.0, 5.0))).changed(),
         "keepalive" => ch |= ui.add(egui::DragValue::new(&mut s.keep_alive).range(0..=3600).suffix(" s")).changed(),
         "reconnect" => ch |= toggle(ui, &mut s.autoreconnect).changed(),
         "editor" => combo(ui, "editor", 190.0, editor_label(&s.default_editor), |ui| {
@@ -704,7 +706,7 @@ mod tests {
     fn every_row_key_is_handled_by_reset_or_is_not_a_setting() {
         for g in TERMINAL.iter().chain(GENERAL) {
             for r in g.rows {
-                if matches!(r.key, "chist" | "data") {
+                if matches!(r.key, "chist" | "data" | "name") {
                     continue;
                 }
                 let mut s = Settings::default();
