@@ -107,6 +107,8 @@ pub struct SyncRuntime {
     pub teams: Vec<sync_client::teams::TeamView>,
     /// the server no longer accepts this device: stop trying until the person signs in again
     pub stopped: bool,
+    /// a team being closed: its items are moving back to Personal, and the team goes once the server has them
+    pub delete_team_after: Option<i64>,
     pub ui: super::ui::SyncUi,
 }
 
@@ -234,6 +236,8 @@ impl App {
                 }
                 state.cursors = out.cursors;
                 state.remember_replaced(&out.conflicts, now);
+                let all_sent = state.items.values().all(|t| t.synced);
+                let team_to_close = self.sync_rt.delete_team_after.filter(|_| all_sent && out.refused == 0);
                 if !state.save(log_key) {
                     self.sync_rt.last_error = Some("Could not save the sync state.".into());
                 } else {
@@ -249,6 +253,23 @@ impl App {
                 }
                 if out.refused > 0 {
                     self.sync_rt.summary.push_str(&format!(", {} refused by the server", out.refused));
+                }
+                if let Some(tid) = team_to_close {
+                    // everything is back in Personal on the server: now the team itself can go
+                    self.sync_rt.delete_team_after = None;
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.sync_rt.ui.op = Some(rx);
+                    let api = Api::new(&cfg.server, Some(cfg.token.clone()));
+                    self.sync_rt.want_now = true;
+                    std::thread::spawn(move || {
+                        let _ = tx.send(match api.delete_team(tid) {
+                            Ok(()) => super::ui::OpResult::Msg("The team was deleted. Its items are back in Personal.".into(), true),
+                            Err(e) => super::ui::OpResult::Msg(e.to_string(), false),
+                        });
+                    });
+                } else if self.sync_rt.delete_team_after.is_some() && out.refused > 0 {
+                    self.sync_rt.delete_team_after = None;
+                    self.notify("The server refused some items, so the team was not deleted.".into(), crate::ui::AMBER());
                 }
                 if !out.conflicts.is_empty() {
                     self.notify(format!("{} item(s) were replaced by a newer version from another device", out.conflicts.len()), crate::ui::AMBER());

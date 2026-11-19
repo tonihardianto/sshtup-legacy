@@ -14,6 +14,7 @@ const MAX_SEALED: usize = 4096;
 pub fn routes() -> Router<State> {
     Router::new()
         .route("/v1/teams", post(create).get(list))
+        .route("/v1/teams/{id}", delete(delete_team))
         .route("/v1/teams/{id}/lookup", post(lookup))
         .route("/v1/teams/{id}/members", post(add_member))
         .route("/v1/teams/{id}/members/{uid}", delete(remove_member))
@@ -119,6 +120,25 @@ async fn list(St(st): St<State>, h: HeaderMap) -> Result<Json<TeamsResp>, ApiErr
             out.teams.push(TeamInfo { id, name, owner: owner == who.user_id, my_role: role_of(c, id, who.user_id).unwrap_or_default(), epoch, key_epoch, sealed_team_key: sealed, prev_sealed_team_key: if owner == who.user_id { prev } else { None }, stale_items, members });
         }
         Ok(Json(out))
+    })
+}
+
+/// The owner closes the team: members, shared records and the team itself go. The owner's client moves the items back to
+/// Personal first; whatever is still in the team's scope is gone with it.
+async fn delete_team(St(st): St<State>, h: HeaderMap, Path(id): Path<i64>) -> Result<Json<serde_json::Value>, ApiErr> {
+    let who = caller(&st.db, &h)?;
+    st.db.with(|c| {
+        if !is_owner(c, id, who.user_id) {
+            return Err(err(StatusCode::FORBIDDEN, "not_owner"));
+        }
+        let scope = format!("t:{id}");
+        let tx = c.transaction().map_err(|_| internal())?;
+        tx.execute("DELETE FROM records WHERE scope=?1", [&scope]).map_err(|_| internal())?;
+        tx.execute("DELETE FROM scope_seq WHERE scope=?1", [&scope]).map_err(|_| internal())?;
+        tx.execute("DELETE FROM members WHERE team_id=?1", [id]).map_err(|_| internal())?;
+        tx.execute("DELETE FROM teams WHERE id=?1", [id]).map_err(|_| internal())?;
+        tx.commit().map_err(|_| internal())?;
+        Ok(Json(serde_json::json!({ "ok": true })))
     })
 }
 
