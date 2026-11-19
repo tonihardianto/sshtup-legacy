@@ -469,12 +469,15 @@ impl App {
             return;
         }
         ui.separator();
-        for (scope, label) in targets {
-            if icon_text_button(ui, crate::icons::Icon::Users, &label).clicked() {
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), (kind.to_string(), id, scope)));
-                ui.close();
+        ui.menu_button("Move to…", |ui| {
+            ui.set_min_width(150.0);
+            for (scope, label) in targets {
+                if ui.button(label.trim_start_matches("Move to ")).clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), (kind.to_string(), id, scope)));
+                    ui.close();
+                }
             }
-        }
+        });
     }
 
     /// Moves an item (or a whole group) to another vault. A secret that becomes readable by a team waits for a yes.

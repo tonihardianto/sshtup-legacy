@@ -106,10 +106,19 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], act: &mut CardAct) 
         items.push((Icon::Folder, "Open SFTP", CardAct::Sftp));
     }
     items.extend([(Icon::Pencil, "Edit", CardAct::Edit), (Icon::Copy, "Duplicate", CardAct::Duplicate), (pin_icon, pin, CardAct::Pin), (Icon::Trash, "Delete", CardAct::Delete)]);
-    for (i, m) in moves.iter().enumerate() {
-        items.insert(items.len() - 1, (Icon::Users, m.as_str(), CardAct::Move(i)));
-    }
     for (icon, text, a) in items {
+        if a == CardAct::Delete && !moves.is_empty() {
+            // one entry with a submenu, however many teams there are
+            ui.menu_button("Move to…", |ui| {
+                ui.set_min_width(150.0);
+                for (i, m) in moves.iter().enumerate() {
+                    if ui.button(m.trim_start_matches("Move to ")).clicked() {
+                        *act = CardAct::Move(i);
+                        ui.close();
+                    }
+                }
+            });
+        }
         let clicked = if a == CardAct::Delete {
             // a soft red field marks the one item that destroys something
             let r = ui.add(egui::Button::new(egui::RichText::new(format!("       {text}")).size(12.5).color(RED())).fill(RED().linear_multiply(0.14)).corner_radius(6).min_size(Vec2::new(0.0, 32.0)));
