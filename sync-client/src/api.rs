@@ -125,6 +125,9 @@ impl Api {
     pub fn teams(&self) -> Result<TeamsResp, SyncError> {
         parse(self.get("/v1/teams")?)
     }
+    pub fn delete_team(&self, team: i64) -> Result<(), SyncError> {
+        self.delete(&format!("/v1/teams/{team}")).map(|_| ())
+    }
     pub fn remove_member(&self, team: i64, user: i64) -> Result<(), SyncError> {
         self.delete(&format!("/v1/teams/{team}/members/{user}")).map(|_| ())
     }

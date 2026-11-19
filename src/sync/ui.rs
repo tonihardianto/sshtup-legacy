@@ -51,6 +51,8 @@ pub struct SyncUi {
     pub new_scope: Option<String>,
     /// (team id, user id, email) waiting for a yes before someone is removed
     pub confirm_remove: Option<(i64, i64, String)>,
+    /// (team id, name) waiting for a yes before the team is deleted
+    pub confirm_delete_team: Option<(i64, String)>,
 }
 
 /// The name shown for a role.
@@ -481,6 +483,25 @@ impl App {
     }
 
     /// Moves an item (or a whole group) to another vault. A secret that becomes readable by a team waits for a yes.
+    /// Starts closing a team: every item in it moves back to Personal, and the team is deleted once the server has them.
+    pub fn close_team(&mut self, team: i64) {
+        let Some(cfg) = self.vault.sync.clone() else { return };
+        let scope = super::teams::scope_of(team);
+        let vault = &self.vault;
+        let Some(state) = self.sync_rt.state.as_mut() else { return };
+        let ids: Vec<String> = state.items.iter().filter(|(_, t)| t.scope == scope && !t.deleted).map(|(k, _)| k.clone()).collect();
+        let now = now_ms();
+        for id in &ids {
+            let _ = super::teams::move_to_scope(state, vault, id, "u", true, &cfg.device_id, now);
+        }
+        if self.cur_vault.as_deref() == Some(scope.as_str()) {
+            self.cur_vault = None;
+        }
+        self.sync_rt.delete_team_after = Some(team);
+        self.sync_rt.want_now = true;
+        self.dirty = true;
+    }
+
     pub fn move_item(&mut self, kind: &str, id: u64, scope: &str, confirmed: bool) {
         let Some(cfg) = self.vault.sync.clone() else { return };
         let item = super::state::item_id(kind, id);
@@ -678,6 +699,21 @@ impl App {
                     }
                     if t.owner && m.role != "owner" && t.ready() && t.stale_items == 0 && ui.add_enabled(su.op.is_none(), egui::Button::new("Remove").small()).clicked() {
                         su.confirm_remove = Some((t.id, m.user_id, m.email.clone()));
+                    }
+                });
+            }
+            if t.owner && t.ready() && su.confirm_delete_team.is_none() && self.sync_rt.delete_team_after.is_none() && ui.add_enabled(su.op.is_none(), egui::Button::new("Delete team").small()).clicked() {
+                su.confirm_delete_team = Some((t.id, t.name.clone()));
+            }
+            if let Some((tid, name)) = su.confirm_delete_team.clone().filter(|c| c.0 == t.id) {
+                ui.label(RichText::new(format!("Delete the team \"{name}\"? Every item in it goes back to your Personal vault. Other members lose access to the team; items they already have stay on their computers as their own.")).size(12.0).color(AMBER()));
+                ui.horizontal(|ui| {
+                    if danger_button(ui, "Delete team").clicked() {
+                        su.confirm_delete_team = None;
+                        self.close_team(tid);
+                    }
+                    if flat_button(ui, "Cancel").clicked() {
+                        su.confirm_delete_team = None;
                     }
                 });
             }

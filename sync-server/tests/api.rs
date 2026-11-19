@@ -524,6 +524,20 @@ fn removed_member_loses_access_and_owner_cannot_be_removed() {
     assert_eq!(call("DELETE", &format!("{base}/v1/teams/{id}/members/{me}"), Some(&a), Value::Null).0, 400);
 }
 
+#[test]
+fn only_the_owner_can_delete_a_team_and_it_takes_its_records_along() {
+    let (base, _db, a, b) = two_users();
+    let id = make_team(&base, &a);
+    add_and_accept(&base, &a, &b, id);
+    assert_eq!(tpush(&base, &a, id, 1, "host:1").0, 200);
+    assert_eq!(call("DELETE", &format!("{base}/v1/teams/{id}"), Some(&b), Value::Null).0, 403);
+    assert_eq!(call("DELETE", &format!("{base}/v1/teams/{id}"), Some(&a), Value::Null).0, 200);
+    assert_eq!(tpull(&base, &a, id).0, 403);
+    assert_eq!(tpull(&base, &b, id).0, 403);
+    assert!(call("GET", &format!("{base}/v1/teams"), Some(&b), Value::Null).1["teams"].as_array().unwrap().is_empty());
+    assert_eq!(call("DELETE", &format!("{base}/v1/teams/{id}"), Some(&a), Value::Null).0, 403);
+}
+
 // ---- hardening ----
 
 fn host_port(base: &str) -> String {

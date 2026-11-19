@@ -3,6 +3,12 @@
 All notable changes to SSHTUP. Versions are the tags of the
 [releases](https://github.com/tonihardianto/sshtup/releases).
 
+## Unreleased
+
+- Teams: the owner can **delete a team** (Settings > Sync > Delete team). Every item in it goes back to the owner's Personal
+  vault first. Other members lose access; what they already have stays on their computers. Update the sync server with
+  `deploy/update.sh`.
+
 ## 0.4.0
 
 - Teams: **roles**. Add people as Admin, Editor or Viewer and change it later in Settings > Sync. Viewers can connect to
