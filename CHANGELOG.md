@@ -6,8 +6,8 @@ All notable changes to SSHTUP. Versions are the tags of the
 ## Unreleased
 
 - Teams: the owner can **delete a team** (Settings > Sync > Delete team). Every item in it goes back to the owner's Personal
-  vault first. Other members lose access; what they already have stays on their computers. Update the sync server with
-  `deploy/update.sh`.
+  vault first. Other members lose the team and its items. The sync server must be updated with `deploy/update.sh` first; the
+  app checks this before it moves anything.
 
 ## 0.4.0
 

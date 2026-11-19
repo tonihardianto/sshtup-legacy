@@ -114,8 +114,7 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, Str
     for (icon, text, a) in items {
         if a == CardAct::Delete {
             icon_menu_button(ui, Icon::Group, "Move to group", |ui| {
-                ui.set_min_width(150.0);
-                if in_group && ui.button("No group").clicked() {
+                if in_group && submenu_item(ui, "No group").clicked() {
                     *act = CardAct::MoveGroup(None);
                     ui.close();
                 }
@@ -123,7 +122,7 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, Str
                     ui.label(egui::RichText::new("No groups yet").size(12.0).color(MUTED()));
                 }
                 for (gid, name) in groups {
-                    if ui.button(name).clicked() {
+                    if submenu_item(ui, name).clicked() {
                         *act = CardAct::MoveGroup(Some(*gid));
                         ui.close();
                     }
@@ -133,9 +132,8 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, Str
         if a == CardAct::Delete && !moves.is_empty() {
             // one entry with a submenu, however many teams there are
             icon_menu_button(ui, Icon::Users, "Move to team", |ui| {
-                ui.set_min_width(150.0);
                 for (i, m) in moves.iter().enumerate() {
-                    if ui.button(m.trim_start_matches("Move to ")).clicked() {
+                    if submenu_item(ui, crate::sync::ui::target_name(m)).clicked() {
                         *act = CardAct::Move(i);
                         ui.close();
                     }

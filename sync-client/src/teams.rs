@@ -193,3 +193,14 @@ pub fn resume_rotation(api: &Api, team_id: i64, x_secret: &[u8; 32], old_key: Op
     }
     Ok(())
 }
+
+/// Whether the server knows how to delete a team. Asks to delete team 0, which never exists: a server that can
+/// answers "not the owner" (403), an older one has no such route (404 or 405).
+pub fn can_delete_teams(api: &Api) -> Result<bool, SyncError> {
+    match api.delete_team(0) {
+        Ok(()) => Ok(true),
+        Err(SyncError::Rejected(e)) if e.starts_with("403") => Ok(true),
+        Err(SyncError::Rejected(e)) if e.starts_with("404") || e.starts_with("405") => Ok(false),
+        Err(e) => Err(e),
+    }
+}

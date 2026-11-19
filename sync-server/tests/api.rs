@@ -536,6 +536,8 @@ fn only_the_owner_can_delete_a_team_and_it_takes_its_records_along() {
     assert_eq!(tpull(&base, &b, id).0, 403);
     assert!(call("GET", &format!("{base}/v1/teams"), Some(&b), Value::Null).1["teams"].as_array().unwrap().is_empty());
     assert_eq!(call("DELETE", &format!("{base}/v1/teams/{id}"), Some(&a), Value::Null).0, 403);
+    // the app asks about team 0 to learn whether the server can delete teams: it must answer 403, never 404
+    assert_eq!(call("DELETE", &format!("{base}/v1/teams/0"), Some(&a), Value::Null).0, 403);
 }
 
 // ---- hardening ----
