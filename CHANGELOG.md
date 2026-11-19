@@ -3,7 +3,7 @@
 All notable changes to SSHTUP. Versions are the tags of the
 [releases](https://github.com/tonihardianto/sshtup/releases).
 
-## Unreleased
+## 0.4.0
 
 - Teams: **roles**. Add people as Admin, Editor or Viewer and change it later in Settings > Sync. Viewers can connect to
   a team's hosts but not change or delete its items; admins can add people and set editor/viewer roles; only the owner
