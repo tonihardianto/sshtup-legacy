@@ -916,11 +916,11 @@ impl App {
     fn group_menu(&self, ui: &mut egui::Ui, kind: &str, id: u64) {
         let targets = self.group_targets(kind, id);
         let top = self.vault.groups.iter().find(|g| g.id == id).map(|g| g.parent.is_some()).unwrap_or(false);
-        if targets.is_empty() && !top {
-            return;
-        }
-        ui.menu_button("Move to group", |ui| {
+        icon_menu_button(ui, crate::icons::Icon::Group, "Move to group", |ui| {
             ui.set_min_width(150.0);
+            if targets.is_empty() && !top {
+                label_muted(ui, "No other groups");
+            }
             if top && ui.button("No group").clicked() {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), (kind.to_string(), id, None::<u64>)));
                 ui.close();

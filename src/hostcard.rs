@@ -72,9 +72,9 @@ pub struct HostCardIn<'a> {
 impl HostCardIn<'_> {
     fn chips(&self) -> Vec<(String, bool)> {
         let mut v: Vec<(String, bool)> = vec![];
-        if !self.team.is_empty() {
-            v.push((self.team.clone(), false));
-        }
+        // if !self.team.is_empty() {
+        //     v.push((self.team.clone(), false));
+        // }
         let room = 3usize.saturating_sub(v.len());
         for t in self.host.tags.iter().take(room) {
             v.push((t.clone(), false));
@@ -112,12 +112,15 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, Str
     }
     items.extend([(Icon::Pencil, "Edit", CardAct::Edit), (Icon::Copy, "Duplicate", CardAct::Duplicate), (pin_icon, pin, CardAct::Pin), (Icon::Trash, "Delete", CardAct::Delete)]);
     for (icon, text, a) in items {
-        if a == CardAct::Delete && (!groups.is_empty() || in_group) {
-            ui.menu_button("Move to group", |ui| {
+        if a == CardAct::Delete {
+            icon_menu_button(ui, Icon::Group, "Move to group", |ui| {
                 ui.set_min_width(150.0);
                 if in_group && ui.button("No group").clicked() {
                     *act = CardAct::MoveGroup(None);
                     ui.close();
+                }
+                if groups.is_empty() && !in_group {
+                    ui.label(egui::RichText::new("No groups yet").size(12.0).color(MUTED()));
                 }
                 for (gid, name) in groups {
                     if ui.button(name).clicked() {
@@ -129,7 +132,7 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, Str
         }
         if a == CardAct::Delete && !moves.is_empty() {
             // one entry with a submenu, however many teams there are
-            ui.menu_button("Move to team", |ui| {
+            icon_menu_button(ui, Icon::Users, "Move to team", |ui| {
                 ui.set_min_width(150.0);
                 for (i, m) in moves.iter().enumerate() {
                     if ui.button(m.trim_start_matches("Move to ")).clicked() {
