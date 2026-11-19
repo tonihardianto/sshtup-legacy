@@ -12,6 +12,8 @@ All notable changes to SSHTUP. Versions are the tags of the
 - Teams: **vault switcher**. The tile at the top of the sidebar now opens a list of All vaults, Personal and each team,
   and hosts, groups, forwards, snippets, keys and identities show only what is in the chosen vault. New items go to
   the chosen team when you can edit it.
+- Teams: **Move to team / Move to Personal** in the right-click menu of hosts (also the "..." menu), groups, forwards and
+  snippets. Moving a group takes its hosts with it. A move that lets the team read a saved password or key asks first.
 
 ## 0.3.0
 
