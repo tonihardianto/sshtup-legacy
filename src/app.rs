@@ -149,6 +149,8 @@ pub struct App {
     /// Set by Cmd/Ctrl+K: the Hosts search box takes the focus on the next frame.
     pub focus_search: bool,
     pub cur_group: Option<u64>,
+    /// the vault the lists show: None is everything, "u" is Personal, "t:<id>" a team
+    pub cur_vault: Option<String>,
     pub forwards_live: HashMap<u64, PtySession>,
     pub toast: Option<(String, Instant, Color32)>,
     pub updates: crate::update::Checker,
@@ -309,6 +311,7 @@ impl App {
             focus_search: false,
             forwards_live: HashMap::new(),
             toast: None,
+            cur_vault: None,
             updates: Default::default(),
             tz: local_tz_offset(),
             shot: shot.map(|path| ShotState { path, frames: 0, requested: false, image: Arc::new(Mutex::new(None)) }),
@@ -878,21 +881,87 @@ ui.horizontal(|ui| {
         }
     }
 
+    /// The tile at the top of the sidebar. With teams it opens a list: all vaults, Personal and each team.
+    fn vault_switcher(&mut self, ui: &mut egui::Ui) {
+        let teams: Vec<(i64, String, String)> = self.vault.sync.as_ref().map(|c| c.teams.iter().map(|t| (t.id, t.name.clone(), crate::sync::ui::role_name(if t.role.is_empty() && t.owner { "owner" } else { &t.role }).to_string())).collect()).unwrap_or_default();
+        let (name, sub) = match self.cur_vault.as_deref() {
+            None if teams.is_empty() => ("Personal".to_string(), "Vault".to_string()),
+            None => ("All vaults".to_string(), format!("{} teams", teams.len())),
+            Some(v) => (self.vault_name(v), if v == "u" { "Only me".to_string() } else { "Team".to_string() }),
+        };
+        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), egui::Sense::click());
+        let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let p = ui.painter();
+        let fill = if resp.hovered() { CARD_HOVER() } else { Color32::TRANSPARENT };
+        p.rect(rect, 12.0, fill, egui::Stroke::new(1.0, BORDER()), egui::StrokeKind::Inside);
+        let b = egui::Rect::from_min_size(rect.left_top() + Vec2::new(8.0, 8.0), Vec2::splat(30.0));
+        badge(p, b, &name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "P".into()), icon_color(&name.to_lowercase()));
+        p.text(egui::pos2(b.right() + 10.0, rect.center().y - 7.0), egui::Align2::LEFT_CENTER, &name, egui::FontId::proportional(13.5), TEXT());
+        p.text(egui::pos2(b.right() + 10.0, rect.center().y + 8.0), egui::Align2::LEFT_CENTER, &sub, egui::FontId::proportional(11.0), MUTED());
+        let c = egui::pos2(rect.right() - 16.0, rect.center().y);
+        let st = egui::Stroke::new(1.5, MUTED());
+        p.line_segment([c + Vec2::new(-4.0, -2.0), c + Vec2::new(0.0, 2.0)], st);
+        p.line_segment([c + Vec2::new(0.0, 2.0), c + Vec2::new(4.0, -2.0)], st);
+        let mut pick: Option<Option<String>> = None;
+        let cur = self.cur_vault.clone();
+        egui::Popup::menu(&resp).gap(6.0).width(rect.width()).show(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            // one row: badge, name, muted detail on the right, check when picked
+            let row = |ui: &mut egui::Ui, icon: &str, name: &str, detail: &str, on: bool| -> bool {
+                let (r, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), egui::Sense::click());
+                let p = ui.painter();
+                if on {
+                    p.rect_filled(r, 8.0, HOVER());
+                } else if resp.hovered() {
+                    p.rect_filled(r, 8.0, CARD_HOVER());
+                }
+                let b = egui::Rect::from_min_size(r.left_top() + Vec2::new(6.0, 6.0), Vec2::splat(22.0));
+                badge(p, b, icon, icon_color(&name.to_lowercase()));
+                p.text(egui::pos2(b.right() + 9.0, r.center().y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(13.0), TEXT());
+                let mut x = r.right() - 10.0;
+                if on {
+                    let c = egui::pos2(x - 4.0, r.center().y);
+                    let st = egui::Stroke::new(1.6, TEXT());
+                    p.line_segment([c + Vec2::new(-4.0, 0.0), c + Vec2::new(-1.0, 3.0)], st);
+                    p.line_segment([c + Vec2::new(-1.0, 3.0), c + Vec2::new(4.5, -3.5)], st);
+                    x -= 18.0;
+                }
+                if !detail.is_empty() {
+                    p.text(egui::pos2(x, r.center().y), egui::Align2::RIGHT_CENTER, detail, egui::FontId::proportional(11.0), MUTED());
+                }
+                resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+            };
+            if !teams.is_empty() && row(ui, "A", "All vaults", "", cur.is_none()) {
+                pick = Some(None);
+            }
+            if row(ui, "P", "Personal", "Only me", cur.as_deref() == Some("u")) {
+                pick = Some(Some("u".into()));
+            }
+            if !teams.is_empty() {
+                ui.add_space(4.0);
+                ui.label(RichText::new("TEAMS").size(10.0).color(MUTED()));
+            }
+            for (id, n, role) in &teams {
+                let sc = crate::sync::teams::scope_of(*id);
+                let ini = n.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "T".into());
+                if row(ui, &ini, n, role, cur.as_deref() == Some(sc.as_str())) {
+                    pick = Some(Some(sc));
+                }
+            }
+        });
+        if let Some(p) = pick {
+            self.set_vault(p);
+            egui::Popup::close_all(ui.ctx());
+        }
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::left("sidebar")
             .exact_size(212.0)
             .resizable(false)
             .frame(Frame::new().fill(BG_WINDOW()).inner_margin(Margin { left: 12, right: 12, top: 14, bottom: 12 }))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::splat(22.0), egui::Sense::hover());
-                    badge(ui.painter(), r, "P", icon_color("personal"));
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.label(RichText::new("Personal").strong().size(13.5));
-                        ui.label(RichText::new("Vault").size(11.0).color(MUTED()));
-                    });
-                });
+                self.vault_switcher(ui);
                 ui.add_space(14.0);
                 for s in Screen::NAV {
                     if s == Screen::KnownHosts {
