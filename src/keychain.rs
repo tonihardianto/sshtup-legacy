@@ -95,7 +95,7 @@ impl App {
     }
 
     fn key_rows(&mut self) -> Vec<Row> {
-        let keys = self.vault.keys.clone();
+        let keys: Vec<_> = self.vault.keys.iter().filter(|k| self.in_vault("key", k.id)).cloned().collect();
         let q = self.kc.search.trim().to_lowercase();
         let mut rows = vec![];
         for k in &keys {
@@ -128,7 +128,7 @@ impl App {
     fn identity_rows(&self) -> Vec<Row> {
         let q = self.kc.search.trim().to_lowercase();
         let mut rows = vec![];
-        for i in &self.vault.identities {
+        for i in self.vault.identities.iter().filter(|i| self.in_vault("identity", i.id)) {
             if !q.is_empty() && !format!("{} {}", i.label, i.username).to_lowercase().contains(&q) {
                 continue;
             }
