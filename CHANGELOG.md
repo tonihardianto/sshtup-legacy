@@ -3,11 +3,15 @@
 All notable changes to SSHTUP. Versions are the tags of the
 [releases](https://github.com/tonihardianto/sshtup/releases).
 
-## Unreleased
+## 0.4.1
 
-- Teams: the owner can **delete a team** (Settings > Sync > Delete team). Every item in it goes back to the owner's Personal
-  vault first. Other members lose the team and its items. The sync server must be updated with `deploy/update.sh` first; the
-  app checks this before it moves anything.
+- Teams: the owner can **delete a team** (the bin icon on the team's card in Settings > Sync). Every item in it goes back
+  to the owner's Personal vault first. Other members lose the team and its items. The sync server must be updated with
+  `deploy/update.sh` first; the app checks this before it moves anything.
+- Settings > Sync: each team is a card with its members, their roles and an Add member button of its own.
+- Settings: tabs in the order General, Terminal, Security, Sync, About, each with an icon. General opens first.
+- Menus: the Move to team and Move to group submenus are compact and list only the names.
+- Light theme: the sidebar's text is darker and heavier, so it reads more easily.
 
 ## 0.4.0
 
