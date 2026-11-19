@@ -168,6 +168,13 @@ pub fn icon_text_button(ui: &mut egui::Ui, icon: crate::icons::Icon, text: &str)
     r
 }
 
+/// A submenu entry with a drawn icon on its left, lined up with `icon_text_button`.
+pub fn icon_menu_button<R>(ui: &mut egui::Ui, icon: crate::icons::Icon, text: &str, add: impl FnOnce(&mut egui::Ui) -> R) {
+    ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
+    let r = ui.menu_button(RichText::new(format!("       {text}")).size(12.5), add);
+    crate::icons::paint(ui.painter(), egui::Pos2::new(r.response.rect.left() + 20.0, r.response.rect.center().y), 14.0, icon, MUTED());
+}
+
 pub fn danger_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
         egui::Button::new(RichText::new(text).color(RED()).size(12.5))
