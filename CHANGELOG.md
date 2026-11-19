@@ -5,6 +5,11 @@ All notable changes to SSHTUP. Versions are the tags of the
 
 ## Unreleased
 
+- Teams: **roles**. Add people as Admin, Editor or Viewer and change it later in Settings > Sync. Viewers can connect to
+  a team's hosts but not change or delete its items; admins can add people and set editor/viewer roles; only the owner
+  removes people or makes admins. People already in a team become editors. Update the sync server with
+  `deploy/update.sh` first. See SYNC.md for what a role does and does not protect.
+
 ## 0.3.0
 
 - **App theme**: Settings > General > Appearance now has Dark, Light and System for the app itself. Terminals keep

@@ -37,6 +37,8 @@ impl Db {
     }
     fn init(c: Connection) -> rusqlite::Result<Db> {
         c.execute_batch(SCHEMA)?;
+        // before roles every non-owner was a plain "member"; they keep the same rights as editors
+        c.execute("UPDATE members SET role='editor' WHERE role='member'", [])?;
         Ok(Db(Arc::new(Mutex::new(c))))
     }
     /// A consistent copy of the whole database in one file (safe while the server runs). Refuses to overwrite.

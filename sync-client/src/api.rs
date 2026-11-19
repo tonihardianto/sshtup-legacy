@@ -1,5 +1,5 @@
 use crate::SyncError;
-use sync_core::wire::{RotateItemsReq, RotateItemsResp, RotateReq, TeamAddMemberReq, TeamCreateReq, TeamLookupReq, TeamLookupResp, TeamsResp, LoginReq, LoginResp, PasswordReq, PullResp, PushReq, PushResp, RecoverFinishReq, RecoverStartResp, RegisterReq, SaltResp, WireItem};
+use sync_core::wire::{RotateItemsReq, RotateItemsResp, RotateReq, TeamAddMemberReq, TeamCreateReq, TeamLookupReq, TeamLookupResp, TeamSetRoleReq, TeamsResp, LoginReq, LoginResp, PasswordReq, PullResp, PushReq, PushResp, RecoverFinishReq, RecoverStartResp, RegisterReq, SaltResp, WireItem};
 
 pub struct RelayPass {
     pub ticket: String,
@@ -118,6 +118,9 @@ impl Api {
     }
     pub fn team_add_member(&self, team: i64, r: &TeamAddMemberReq) -> Result<(), SyncError> {
         self.post(&format!("/v1/teams/{team}/members"), r).map(|_| ())
+    }
+    pub fn team_set_role(&self, team: i64, user: i64, role: &str) -> Result<(), SyncError> {
+        self.post(&format!("/v1/teams/{team}/members/{user}/role"), &TeamSetRoleReq { role: role.to_string() }).map(|_| ())
     }
     pub fn teams(&self) -> Result<TeamsResp, SyncError> {
         parse(self.get("/v1/teams")?)

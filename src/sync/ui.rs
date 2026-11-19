@@ -39,6 +39,8 @@ pub struct SyncUi {
     pub team_name: String,
     pub member_email: String,
     pub member_team: i64,
+    /// the role the next person gets: "admin", "editor" or "viewer" (empty: editor)
+    pub member_role: String,
     /// someone about to be added to a team: waits for the owner to confirm the fingerprint
     pub candidate: Option<(i64, sync_client::teams::MemberLookup)>,
     /// (item id, scope, warning) waiting for a yes before a secret is shared with a team
@@ -47,6 +49,22 @@ pub struct SyncUi {
     pub new_scope: Option<String>,
     /// (team id, user id, email) waiting for a yes before someone is removed
     pub confirm_remove: Option<(i64, i64, String)>,
+}
+
+/// The name shown for a role.
+pub fn role_name(role: &str) -> &'static str {
+    match sync_core::wire::roles::normalize(role) {
+        "owner" => "Owner",
+        "admin" => "Admin",
+        "viewer" => "Viewer",
+        _ => "Editor",
+    }
+}
+
+/// The roles a person with `role` may give to others.
+pub fn grantable(role: &str) -> Vec<&'static str> {
+    use sync_core::wire::roles::can_grant;
+    ["admin", "editor", "viewer"].into_iter().filter(|r| can_grant(role, r)).collect()
 }
 
 pub enum OpResult {
@@ -347,6 +365,14 @@ impl App {
     }
 
     /// In the form of a NEW item: choose where it will live. Starts on the team of the group it is created in.
+    /// The item lives in a team where this account is a viewer: it may be read and connected to, not changed.
+    pub fn item_read_only(&self, kind: &str, id: u64) -> bool {
+        let Some(cfg) = self.vault.sync.as_ref() else { return false };
+        let Some(state) = self.sync_rt.state.as_ref() else { return false };
+        let scope = state.items.get(&super::state::item_id(kind, id)).map(|t| t.scope.as_str()).unwrap_or("u");
+        scope.strip_prefix("t:").and_then(|n| n.parse::<i64>().ok()).and_then(|t| cfg.teams.iter().find(|x| x.id == t)).map(|t| !t.can_write()).unwrap_or(false)
+    }
+
     pub fn sync_new_scope_row(&mut self, ui: &mut egui::Ui, kind: &str, group: Option<u64>) {
         let Some(cfg) = self.vault.sync.clone() else { return };
         if cfg.teams.is_empty() || self.sync_rt.state.is_none() {
@@ -372,7 +398,7 @@ impl App {
             if ui.selectable_label(cur == "u", "Only me").clicked() {
                 self.sync_rt.ui.new_scope = Some("u".into());
             }
-            for t in &cfg.teams {
+            for t in cfg.teams.iter().filter(|t| t.can_write()) {
                 let sc = super::teams::scope_of(t.id);
                 if ui.selectable_label(cur == sc, format!("Team {}", t.name)).clicked() {
                     self.sync_rt.ui.new_scope = Some(sc);
@@ -411,6 +437,11 @@ impl App {
         if cfg.teams.is_empty() || self.sync_rt.state.is_none() {
             return;
         }
+        if self.item_read_only(kind, id) {
+            ui.add_space(8.0);
+            ui.label(RichText::new("You are a viewer in this team: you can connect, but not change or move this item.").size(11.5).color(MUTED()));
+            return;
+        }
         let item = super::state::item_id(kind, id);
         let cur = self.sync_rt.state.as_ref().and_then(|s| s.items.get(&item)).map(|t| t.scope.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "u".into());
         let name_of = |scope: &str| -> String {
@@ -430,7 +461,7 @@ impl App {
             if ui.selectable_label(cur == "u", "Only me").clicked() {
                 pick = Some("u".into());
             }
-            for t in &cfg.teams {
+            for t in cfg.teams.iter().filter(|t| t.can_write()) {
                 let sc = super::teams::scope_of(t.id);
                 if ui.selectable_label(cur == sc, format!("Team {}", t.name)).clicked() {
                     pick = Some(sc);
@@ -491,13 +522,39 @@ impl App {
         let (server, token) = (cfg.server.clone(), cfg.token.clone());
         for t in self.sync_rt.teams.clone() {
             ui.add_space(4.0);
-            ui.label(RichText::new(format!("Team {}{}", t.name, if t.owner { " (you own it)" } else { "" })).size(12.5).color(TEXT()));
+            ui.label(RichText::new(format!("Team {} — you are {}", t.name, role_name(&t.role))).size(12.5).color(TEXT()));
+            if !t.can_write() {
+                ui.label(RichText::new("As a viewer you can connect and read, but not add or change anything. The team's key lets you open every item, so treat it like any other member would.").size(11.5).color(MUTED()));
+            }
             if !t.ready() {
                 ui.label(RichText::new(if t.owner { "The team key is being renewed after a removal." } else { "Waiting for the owner to renew the team key. Shared items are paused until then." }).size(11.5).color(AMBER()));
             }
             for m in &t.members {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("   {} — {}", m.email, m.fingerprint)).monospace().size(11.0).color(MUTED()));
+                    let can_edit_role = t.can_manage() && t.ready() && m.role != "owner" && !(m.role == "admin" && !t.owner);
+                    if can_edit_role {
+                        let mut pick = m.role.clone();
+                        egui::ComboBox::from_id_salt(("member_role", t.id, m.user_id)).width(80.0).selected_text(role_name(&m.role)).show_ui(ui, |ui| {
+                            for r in grantable(&t.role) {
+                                ui.selectable_value(&mut pick, r.to_string(), role_name(r));
+                            }
+                        });
+                        if pick != m.role && su.op.is_none() {
+                            let (tx, rx) = channel();
+                            su.op = Some(rx);
+                            let (s2, t2, tid, uid, email, role) = (server.clone(), token.clone(), t.id, m.user_id, m.email.clone(), pick);
+                            self.sync_rt.want_now = true;
+                            std::thread::spawn(move || {
+                                let _ = tx.send(match tm::set_role(&Api::new(&s2, Some(t2)), tid, uid, &role) {
+                                    Ok(()) => OpResult::Msg(format!("{email} is now {}.", role_name(&role).to_lowercase()), true),
+                                    Err(e) => OpResult::Msg(e.to_string(), false),
+                                });
+                            });
+                        }
+                    } else {
+                        ui.label(RichText::new(role_name(&m.role)).size(11.0).color(MUTED()));
+                    }
                     if t.owner && m.role != "owner" && t.ready() && t.stale_items == 0 && ui.add_enabled(su.op.is_none(), egui::Button::new("Remove").small()).clicked() {
                         su.confirm_remove = Some((t.id, m.user_id, m.email.clone()));
                     }
@@ -531,7 +588,7 @@ impl App {
             }
         }
         // add a member
-        let owned: Vec<_> = self.sync_rt.teams.iter().filter(|t| t.owner && t.key.is_some()).cloned().collect();
+        let owned: Vec<_> = self.sync_rt.teams.iter().filter(|t| t.can_manage() && t.key.is_some()).cloned().collect();
         if !owned.is_empty() {
             ui.add_space(4.0);
             if !owned.iter().any(|t| t.id == su.member_team) {
@@ -559,15 +616,28 @@ impl App {
             ui.label(RichText::new(format!("{} has the fingerprint:", who.email)).size(12.0).color(TEXT()));
             ui.label(RichText::new(&who.fingerprint).monospace().size(13.0).color(AMBER()));
             ui.label(RichText::new("Ask them to read the number in their own Settings → Sync. Add them only if it is the same.").size(12.0).color(MUTED()));
+            let my_role = self.sync_rt.teams.iter().find(|t| t.id == team).map(|t| t.role.clone()).unwrap_or_default();
+            let options = grantable(&my_role);
+            if !options.contains(&su.member_role.as_str()) {
+                su.member_role = "editor".into();
+            }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Role").size(12.0).color(MUTED()));
+                egui::ComboBox::from_id_salt("new_member_role").width(90.0).selected_text(role_name(&su.member_role)).show_ui(ui, |ui| {
+                    for r in options {
+                        ui.selectable_value(&mut su.member_role, r.to_string(), role_name(r));
+                    }
+                });
+            });
             ui.horizontal(|ui| {
                 if primary_button(ui, "The numbers match, add to the team").clicked() {
                     let key = self.sync_rt.teams.iter().find(|t| t.id == team).and_then(|t| t.key.clone());
                     if let Some(key) = key {
                         let (tx, rx) = channel();
                         su.op = Some(rx);
-                        let (s2, t2, who2) = (server.clone(), token.clone(), who.clone());
+                        let (s2, t2, who2, role) = (server.clone(), token.clone(), who.clone(), su.member_role.clone());
                         std::thread::spawn(move || {
-                            let _ = tx.send(match tm::add_member(&Api::new(&s2, Some(t2)), team, &who2, &key) {
+                            let _ = tx.send(match tm::add_member(&Api::new(&s2, Some(t2)), team, &who2, &key, &role) {
                                 Ok(()) => OpResult::Msg(format!("{} is in the team. They get the key on their next sync.", who2.email), true),
                                 Err(e) => OpResult::Msg(e.to_string(), false),
                             });

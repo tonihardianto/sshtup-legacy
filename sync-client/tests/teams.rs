@@ -61,7 +61,7 @@ fn share(w: &World, owner: &(Session, Api), member: &(Session, Api), member_emai
     let who = lookup(&owner.1, team, member_email).unwrap();
     let teams = my_teams(&owner.1, &owner.0.secrets.x_secret).unwrap();
     let key = teams[0].key.clone().expect("owner opens own key");
-    add_member(&owner.1, team, &who, &key).unwrap();
+    add_member(&owner.1, team, &who, &key, "editor").unwrap();
     let _ = member;
     team
 }
@@ -155,7 +155,7 @@ fn engine(w: &World, u: &(Session, Api), dev: &str) -> Engine<Mem, Api> {
 fn join(o: &(Session, Api), m: &(Session, Api), team: i64, email: &str) {
     let who = lookup(&o.1, team, email).unwrap();
     let key = teams_of(o)[0].key.clone().unwrap();
-    add_member(&o.1, team, &who, &key).unwrap();
+    add_member(&o.1, team, &who, &key, "editor").unwrap();
     let _ = m;
 }
 /// owner + `removed` + `kept`, with `n` items already in the team

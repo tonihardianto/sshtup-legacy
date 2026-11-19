@@ -56,6 +56,11 @@ async fn push(St(st): St<State>, h: HeaderMap, Json(req): Json<PushReq>) -> Resu
     }
     st.db.with(|c| -> Result<Json<PushResp>, ApiErr> {
         let (scope, team_epoch) = resolve_scope(c, &who, &req.scope)?;
+        if let Some(team) = scope.strip_prefix("t:").and_then(|s| s.parse::<i64>().ok()) {
+            if !crate::routes_teams::role_of(c, team, who.user_id).map(|r| sync_core::wire::roles::can_write(&r)).unwrap_or(false) {
+                return Err(err(StatusCode::FORBIDDEN, "read_only"));
+            }
+        }
         let now = now_ms();
         let internal = || err(StatusCode::INTERNAL_SERVER_ERROR, "internal");
         let tx = c.transaction().map_err(|_| internal())?;

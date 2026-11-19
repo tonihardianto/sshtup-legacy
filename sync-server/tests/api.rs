@@ -703,3 +703,107 @@ fn without_trust_proxy_the_header_changes_nothing() {
     }
     assert_eq!(login_from(&base, "a@x.io", 1, "203.0.113.99"), 429, "a client cannot dodge the limit by lying");
 }
+
+// ---- roles ----
+
+fn add_as(base: &str, by: &str, email: &str, role: Option<&str>, team: i64) -> u16 {
+    let mut body = json!({"email": email, "sealed_team_key": "sealed"});
+    if let Some(r) = role {
+        body["role"] = json!(r);
+    }
+    call("POST", &format!("{base}/v1/teams/{team}/members"), Some(by), body).0
+}
+fn role_in_list(base: &str, tok: &str, team: i64, email: &str) -> String {
+    let (_, v) = call("GET", &format!("{base}/v1/teams"), Some(tok), Value::Null);
+    let t = v["teams"].as_array().unwrap().iter().find(|t| t["id"] == team).unwrap().clone();
+    t["members"].as_array().unwrap().iter().find(|m| m["email"] == email).unwrap()["role"].as_str().unwrap().to_string()
+}
+fn set_role(base: &str, by: &str, team: i64, user: i64, role: &str) -> u16 {
+    call("POST", &format!("{base}/v1/teams/{team}/members/{user}/role"), Some(by), json!({"role": role})).0
+}
+fn user_id(base: &str, tok: &str, team: i64, email: &str) -> i64 {
+    let (_, v) = call("GET", &format!("{base}/v1/teams"), Some(tok), Value::Null);
+    let t = v["teams"].as_array().unwrap().iter().find(|t| t["id"] == team).unwrap().clone();
+    t["members"].as_array().unwrap().iter().find(|m| m["email"] == email).unwrap()["user_id"].as_i64().unwrap()
+}
+
+#[test]
+fn a_member_added_without_a_role_is_an_editor() {
+    let (base, _db, a, b) = two_users();
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", None, team), 200);
+    assert_eq!(role_in_list(&base, &a, team, "mem@x.io"), "editor");
+    assert_eq!(tpush(&base, &b, team, 1, "i1").0, 200);
+    let (_, v) = call("GET", &format!("{base}/v1/teams"), Some(&b), Value::Null);
+    assert_eq!(v["teams"][0]["my_role"], "editor");
+    let (_, v) = call("GET", &format!("{base}/v1/teams"), Some(&a), Value::Null);
+    assert_eq!(v["teams"][0]["my_role"], "owner");
+}
+
+#[test]
+fn a_viewer_reads_but_cannot_push() {
+    let (base, _db, a, b) = two_users();
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", Some("viewer"), team), 200);
+    assert_eq!(tpush(&base, &a, team, 1, "i1").0, 200);
+    let (c, v) = tpush(&base, &b, team, 1, "i2");
+    assert_eq!(c, 403);
+    assert_eq!(v["error"], "read_only");
+    assert_eq!(tpull(&base, &b, team).0, 200);
+}
+
+#[test]
+fn the_owner_changes_a_role_and_the_rights_follow() {
+    let (base, _db, a, b) = two_users();
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", Some("editor"), team), 200);
+    let uid = user_id(&base, &a, team, "mem@x.io");
+    assert_eq!(set_role(&base, &a, team, uid, "viewer"), 200);
+    assert_eq!(tpush(&base, &b, team, 1, "i1").0, 403);
+    assert_eq!(set_role(&base, &a, team, uid, "editor"), 200);
+    assert_eq!(tpush(&base, &b, team, 1, "i1").0, 200);
+    // nobody changes their own role, and the owner's role is fixed
+    let me = user_id(&base, &a, team, "owner@x.io");
+    assert_eq!(set_role(&base, &a, team, me, "viewer"), 400);
+    assert_eq!(set_role(&base, &b, team, me, "viewer"), 403);
+    assert_eq!(set_role(&base, &a, team, uid, "owner"), 403);
+    assert_eq!(set_role(&base, &a, team, uid, "boss"), 403);
+}
+
+#[test]
+fn an_editor_cannot_manage_the_team() {
+    let (base, db, a, b) = two_users();
+    setup_user(&base, &db, "third@x.io", 3);
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", Some("editor"), team), 200);
+    assert_eq!(call("POST", &format!("{base}/v1/teams/{team}/lookup"), Some(&b), json!({"email": "third@x.io"})).0, 403);
+    assert_eq!(add_as(&base, &b, "third@x.io", Some("viewer"), team), 403);
+}
+
+#[test]
+fn an_admin_adds_people_but_cannot_make_admins() {
+    let (base, db, a, b) = two_users();
+    setup_user(&base, &db, "third@x.io", 3);
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", Some("admin"), team), 200);
+    assert_eq!(call("POST", &format!("{base}/v1/teams/{team}/lookup"), Some(&b), json!({"email": "third@x.io"})).0, 200);
+    assert_eq!(add_as(&base, &b, "third@x.io", Some("admin"), team), 403);
+    assert_eq!(add_as(&base, &b, "third@x.io", Some("viewer"), team), 200);
+    let third = user_id(&base, &a, team, "third@x.io");
+    assert_eq!(set_role(&base, &b, team, third, "editor"), 200);
+    assert_eq!(set_role(&base, &b, team, third, "admin"), 403);
+    // an admin does not touch the owner, and only the owner removes people
+    let owner = user_id(&base, &a, team, "owner@x.io");
+    assert_eq!(set_role(&base, &b, team, owner, "viewer"), 403);
+    assert_eq!(call("DELETE", &format!("{base}/v1/teams/{team}/members/{third}"), Some(&b), Value::Null).0, 403);
+}
+
+#[test]
+fn the_old_member_role_counts_as_editor() {
+    let (base, db, a, b) = two_users();
+    let team = make_team(&base, &a);
+    assert_eq!(add_as(&base, &a, "mem@x.io", None, team), 200);
+    db.with(|c| c.execute("UPDATE members SET role='member' WHERE team_id=?1 AND role!='owner'", [team]).unwrap());
+    assert_eq!(role_in_list(&base, &a, team, "mem@x.io"), "editor");
+    assert_eq!(tpush(&base, &b, team, 1, "i1").0, 200);
+}

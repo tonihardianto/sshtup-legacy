@@ -57,6 +57,20 @@ Before the first sync the app saves a copy of `vault.json` next to it and gives 
   *Look up*. The app shows **their fingerprint** (8 groups of 5 digits). Ask them to read you the number shown in their own
   Settings → Sync. Only if it matches, press *add to the team*. This is what stops the server from swapping in its own
   key. There is no accept step: the person is a member from that moment and gets the key on their next sync round.
+* Every member has a **role**, chosen when you add them and changeable later in the member list:
+
+  | Role | Can read and connect | Can add and change items | Can add people and set roles | Can remove people |
+  |---|---|---|---|---|
+  | Owner | yes | yes | yes | yes |
+  | Admin | yes | yes | yes (editors and viewers only) | no |
+  | Editor | yes | yes | no | no |
+  | Viewer | yes | no | no | no |
+
+  Only the owner makes admins. People added before roles existed are editors. A viewer's computer only receives;
+  the server also refuses anything a viewer sends. **A viewer still holds the team key**, so they can open every item,
+  saved passwords included: a role limits who can *change* things, not who can *read* them. Keep secrets a person
+  should not see in a team they are not in. Update the server (`deploy/update.sh`) before using roles; an older server
+  treats everyone but the owner as an editor.
 * In the form of a new item, **Who can see this** picks *Only me* or a team before you save. A new host or sub-group
   created inside a shared group starts on that group's team.
 * In an item's editor, **Who can see this** moves it between *Only me* and a team. Moving a host with a saved password,

@@ -17,12 +17,26 @@ pub fn routes() -> Router<State> {
         .route("/v1/teams/{id}/lookup", post(lookup))
         .route("/v1/teams/{id}/members", post(add_member))
         .route("/v1/teams/{id}/members/{uid}", delete(remove_member))
+        .route("/v1/teams/{id}/members/{uid}/role", post(set_role))
         .route("/v1/teams/{id}/rotate", post(rotate))
         .route("/v1/teams/{id}/rotate/items", post(rotate_items))
 }
 
 fn internal() -> ApiErr {
     err(StatusCode::INTERNAL_SERVER_ERROR, "internal")
+}
+
+/// The role this user has in the team, if they are in it.
+pub fn role_of(c: &Connection, team: i64, user: i64) -> Option<String> {
+    c.query_row("SELECT role FROM members WHERE team_id=?1 AND user_id=?2", params![team, user], |r| r.get::<_, String>(0)).ok().map(|r| roles::normalize(&r).to_string())
+}
+
+fn manager_role(c: &Connection, team: i64, user: i64) -> Result<String, ApiErr> {
+    match role_of(c, team, user) {
+        Some(r) if roles::can_manage(&r) => Ok(r),
+        Some(_) => Err(err(StatusCode::FORBIDDEN, "not_allowed")),
+        None => Err(err(StatusCode::FORBIDDEN, "not_a_member")),
+    }
 }
 
 fn is_owner(c: &Connection, team: i64, user: i64) -> bool {
@@ -50,9 +64,7 @@ async fn lookup(St(st): St<State>, h: HeaderMap, Path(id): Path<i64>, Json(r): J
     let who = caller(&st.db, &h)?;
     let email = r.email.trim().to_lowercase();
     st.db.with(|c| {
-        if !is_owner(c, id, who.user_id) {
-            return Err(err(StatusCode::FORBIDDEN, "not_owner"));
-        }
+        manager_role(c, id, who.user_id)?;
         let row: Option<(i64, String)> = c.query_row("SELECT id,pubkey FROM users WHERE email=?1", [&email], |r| Ok((r.get(0)?, r.get(1)?))).ok();
         let Some((uid, pubkey)) = row else { return Err(err(StatusCode::NOT_FOUND, "no_such_user")) };
         let already: bool = c.query_row("SELECT 1 FROM members WHERE team_id=?1 AND user_id=?2", params![id, uid], |_| Ok(())).is_ok();
@@ -63,16 +75,18 @@ async fn lookup(St(st): St<State>, h: HeaderMap, Path(id): Path<i64>, Json(r): J
     })
 }
 
-/// The owner adds a person: the team key, sealed to that person's public key, makes them a member at once.
+/// The owner or an admin adds a person: the team key, sealed to that person's public key, makes them a member at once.
 async fn add_member(St(st): St<State>, h: HeaderMap, Path(id): Path<i64>, Json(r): Json<TeamAddMemberReq>) -> Result<Json<serde_json::Value>, ApiErr> {
     let who = caller(&st.db, &h)?;
     let email = r.email.trim().to_lowercase();
     if r.sealed_team_key.is_empty() || r.sealed_team_key.len() > MAX_SEALED {
         return Err(err(StatusCode::BAD_REQUEST, "bad_request"));
     }
+    let role = r.role.as_deref().map(|x| if x == "member" { "editor" } else { x }).unwrap_or("editor").to_string();
     st.db.with(|c| {
-        if !is_owner(c, id, who.user_id) {
-            return Err(err(StatusCode::FORBIDDEN, "not_owner"));
+        let mine = manager_role(c, id, who.user_id)?;
+        if !roles::can_grant(&mine, &role) {
+            return Err(err(StatusCode::FORBIDDEN, "not_allowed"));
         }
         let uid: i64 = c.query_row("SELECT id FROM users WHERE email=?1", [&email], |r| r.get(0)).map_err(|_| err(StatusCode::NOT_FOUND, "no_such_user"))?;
         let epoch: u32 = c.query_row("SELECT epoch FROM teams WHERE id=?1", [id], |r| r.get(0)).map_err(|_| internal())?;
@@ -81,7 +95,7 @@ async fn add_member(St(st): St<State>, h: HeaderMap, Path(id): Path<i64>, Json(r
         if owner_epoch != epoch {
             return Err(err(StatusCode::CONFLICT, "rotation_pending"));
         }
-        let n = c.execute("INSERT OR IGNORE INTO members(team_id,user_id,role,sealed_team_key,epoch) VALUES(?1,?2,'member',?3,?4)", params![id, uid, r.sealed_team_key, epoch]).map_err(|_| internal())?;
+        let n = c.execute("INSERT OR IGNORE INTO members(team_id,user_id,role,sealed_team_key,epoch) VALUES(?1,?2,?3,?4,?5)", params![id, uid, role, r.sealed_team_key, epoch]).map_err(|_| internal())?;
         if n == 0 {
             return Err(err(StatusCode::CONFLICT, "already_member"));
         }
@@ -101,8 +115,8 @@ async fn list(St(st): St<State>, h: HeaderMap) -> Result<Json<TeamsResp>, ApiErr
             let (key_epoch, prev): (u32, Option<String>) = c.query_row("SELECT epoch,prev_sealed_team_key FROM members WHERE team_id=?1 AND user_id=?2", params![id, who.user_id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(|_| internal())?;
             let stale_items = if owner == who.user_id { stale_count(c, id) } else { 0 };
             let mut mq = c.prepare("SELECT u.id,u.email,m.role,u.pubkey FROM members m JOIN users u ON u.id=m.user_id WHERE m.team_id=?1 ORDER BY u.id").map_err(|_| internal())?;
-            let members = mq.query_map([id], |r| Ok(MemberInfo { user_id: r.get(0)?, email: r.get(1)?, role: r.get(2)?, pubkey: r.get(3)? })).map_err(|_| internal())?.flatten().collect();
-            out.teams.push(TeamInfo { id, name, owner: owner == who.user_id, epoch, key_epoch, sealed_team_key: sealed, prev_sealed_team_key: if owner == who.user_id { prev } else { None }, stale_items, members });
+            let members = mq.query_map([id], |r| Ok(MemberInfo { user_id: r.get(0)?, email: r.get(1)?, role: roles::normalize(&r.get::<_, String>(2)?).to_string(), pubkey: r.get(3)? })).map_err(|_| internal())?.flatten().collect();
+            out.teams.push(TeamInfo { id, name, owner: owner == who.user_id, my_role: role_of(c, id, who.user_id).unwrap_or_default(), epoch, key_epoch, sealed_team_key: sealed, prev_sealed_team_key: if owner == who.user_id { prev } else { None }, stale_items, members });
         }
         Ok(Json(out))
     })
@@ -127,6 +141,24 @@ async fn remove_member(St(st): St<State>, h: HeaderMap, Path((id, uid)): Path<(i
             tx.execute("UPDATE teams SET epoch=epoch+1 WHERE id=?1", [id]).map_err(|_| internal())?;
         }
         tx.commit().map_err(|_| internal())?;
+        Ok(Json(serde_json::json!({ "ok": true })))
+    })
+}
+
+/// Changes what a member may do. The owner can set any role below owner; an admin only moves editors and viewers
+/// between editor and viewer. Nobody changes the owner's role.
+async fn set_role(St(st): St<State>, h: HeaderMap, Path((id, uid)): Path<(i64, i64)>, Json(r): Json<TeamSetRoleReq>) -> Result<Json<serde_json::Value>, ApiErr> {
+    let who = caller(&st.db, &h)?;
+    st.db.with(|c| {
+        let mine = manager_role(c, id, who.user_id)?;
+        if uid == who.user_id {
+            return Err(err(StatusCode::BAD_REQUEST, "cannot_change_own_role"));
+        }
+        let Some(theirs) = role_of(c, id, uid) else { return Err(err(StatusCode::NOT_FOUND, "no_such_member")) };
+        if theirs == roles::OWNER || !roles::can_grant(&mine, &r.role) || (roles::normalize(&mine) == roles::ADMIN && theirs == roles::ADMIN) {
+            return Err(err(StatusCode::FORBIDDEN, "not_allowed"));
+        }
+        c.execute("UPDATE members SET role=?3 WHERE team_id=?1 AND user_id=?2", params![id, uid, r.role]).map_err(|_| internal())?;
         Ok(Json(serde_json::json!({ "ok": true })))
     })
 }
