@@ -6,7 +6,7 @@ use base64::Engine as _;
 use sync_core::boxes::{fingerprint, keypair_from_secret, open_sealed, seal_to};
 use crate::api::Remote;
 use sync_core::seal::{open_item, seal_item, ItemMeta};
-use sync_core::wire::{RotateItemsReq, RotateMember, RotateReq, TeamAddMemberReq, TeamCreateReq, WireItem};
+use sync_core::wire::{roles, RotateItemsReq, RotateMember, RotateReq, TeamAddMemberReq, TeamCreateReq, WireItem};
 use zeroize::Zeroizing;
 
 fn b64() -> base64::engine::GeneralPurpose {
@@ -22,6 +22,8 @@ pub struct TeamView {
     pub id: i64,
     pub name: String,
     pub owner: bool,
+    /// this account's role: owner, admin, editor or viewer
+    pub role: String,
     pub epoch: u32,
     /// the epoch `key` belongs to; behind `epoch` until the owner has rotated the key after a removal
     pub key_epoch: u32,
@@ -33,6 +35,14 @@ pub struct TeamView {
 }
 
 impl TeamView {
+    /// May add, change and delete the team's items.
+    pub fn can_write(&self) -> bool {
+        roles::can_write(&self.role)
+    }
+    /// May add people and change roles.
+    pub fn can_manage(&self) -> bool {
+        roles::can_manage(&self.role)
+    }
     /// The key may be used for the team's items right now.
     pub fn ready(&self) -> bool {
         self.key.is_some() && self.key_epoch == self.epoch
@@ -80,9 +90,14 @@ pub fn lookup(api: &Api, team: i64, email: &str) -> Result<MemberLookup, SyncErr
     Ok(MemberLookup { email, fingerprint: fingerprint(&pubkey), pubkey })
 }
 
-/// Step 2: the owner seals the team key to that person's public key. They are a member from this moment.
-pub fn add_member(api: &Api, team: i64, who: &MemberLookup, team_key: &[u8; 32]) -> Result<(), SyncError> {
-    api.team_add_member(team, &TeamAddMemberReq { email: who.email.clone(), sealed_team_key: b64().encode(seal_to(&who.pubkey, team_key)) })
+/// Step 2: the owner or an admin seals the team key to that person's public key. They are a member from this moment.
+pub fn add_member(api: &Api, team: i64, who: &MemberLookup, team_key: &[u8; 32], role: &str) -> Result<(), SyncError> {
+    api.team_add_member(team, &TeamAddMemberReq { email: who.email.clone(), sealed_team_key: b64().encode(seal_to(&who.pubkey, team_key)), role: Some(role.to_string()) })
+}
+
+/// Changes what a member may do (`admin`, `editor` or `viewer`).
+pub fn set_role(api: &Api, team: i64, user_id: i64, role: &str) -> Result<(), SyncError> {
+    api.team_set_role(team, user_id, role)
 }
 
 /// The teams this account is in, with keys opened using the account's X25519 secret.
@@ -104,7 +119,7 @@ pub fn my_teams(api: &Api, x_secret: &[u8; 32]) -> Result<Vec<TeamView>, SyncErr
                     MemberView { fingerprint: fingerprint(&pubkey), pubkey, user_id: m.user_id, email: m.email, role: m.role }
                 })
                 .collect();
-            TeamView { id: t.id, name: t.name, owner: t.owner, epoch: t.epoch, key_epoch: t.key_epoch, key, prev_key, stale_items: t.stale_items, members }
+            TeamView { id: t.id, name: t.name, owner: t.owner, role: if t.my_role.is_empty() { if t.owner { roles::OWNER.into() } else { roles::EDITOR.into() } } else { roles::normalize(&t.my_role).into() }, epoch: t.epoch, key_epoch: t.key_epoch, key, prev_key, stale_items: t.stale_items, members }
         })
         .collect();
     Ok(teams)

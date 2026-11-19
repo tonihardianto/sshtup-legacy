@@ -12,6 +12,9 @@ pub struct TeamCfg {
     pub name: String,
     pub epoch: u32,
     pub owner: bool,
+    /// owner, admin, editor or viewer; empty in a vault saved before roles (an editor)
+    #[serde(default)]
+    pub role: String,
     /// hex, 32 bytes
     pub key: String,
 }
@@ -377,5 +380,11 @@ mod tests {
         fn tomb(id: &str, scope: &str, t: u64) -> sync_client::engine::LocalItem {
             sync_client::engine::LocalItem { id: id.into(), scope: scope.into(), stamp: sync_core::merge::Stamp { updated_at: t, deleted: true, device: "o".into() }, json: None, dirty: false }
         }
+    }
+}
+
+impl TeamCfg {
+    pub fn can_write(&self) -> bool {
+        sync_core::wire::roles::can_write(if self.role.is_empty() && self.owner { "owner" } else { &self.role })
     }
 }

@@ -156,6 +156,19 @@ fn editor_item_id(ed: &Editor) -> u64 {
     }
 }
 
+/// The kind used in the sync state's item ids.
+fn editor_kind(ed: &Editor) -> Option<&'static str> {
+    Some(match ed {
+        Editor::Host(_) => "host",
+        Editor::Group(_) => "group",
+        Editor::Key(_) => "key",
+        Editor::Identity(_) => "identity",
+        Editor::Forward(_) => "forward",
+        Editor::Snippet(_) => "snippet",
+        Editor::None => return None,
+    })
+}
+
 /// The line under the form title: what is being edited.
 fn editor_subtitle(ed: &Editor, is_new: bool) -> String {
     if is_new {
@@ -231,6 +244,10 @@ impl App {
 
     fn commit_editor(&mut self, ed: Editor) -> Option<u64> {
         let new = self.editor_new;
+        if !new && editor_kind(&ed).map(|k| self.item_read_only(k, editor_item_id(&ed))).unwrap_or(false) {
+            self.notify("You are a viewer in this team and cannot change its items.".into(), AMBER());
+            return None;
+        }
         let (a, b) = (self.edit_a.clone(), self.edit_b.clone());
         match ed {
             Editor::None => None,
@@ -347,6 +364,7 @@ impl App {
                 });
             }
         }
+        let read_only = !is_new && editor_kind(&ed).map(|k| self.item_read_only(k, editor_item_id(&ed))).unwrap_or(false);
         let (title, can_connect) = match &ed {
             Editor::Host(_) => (if is_new { "New Host" } else { "Edit Host" }, true),
             Editor::Group(_) => (if is_new { "New Group" } else { "Edit Group" }, false),
@@ -394,17 +412,26 @@ impl App {
                     ui.add_space(2.0);
                     // right-aligned: Save is the rightmost (primary), Save & connect sits to its left
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if primary_button(ui, "Save").clicked() {
-                            act = EdAct::Save;
-                        }
-                        if can_connect && flat_button(ui, "Save & connect").clicked() {
-                            act = EdAct::Connect;
+                        if read_only {
+                            // a viewer may open the host but not change anything
+                            if can_connect && primary_button(ui, "Connect").clicked() {
+                                act = EdAct::Connect;
+                            } else if !can_connect && primary_button(ui, "Close").clicked() {
+                                act = EdAct::Cancel;
+                            }
+                        } else {
+                            if primary_button(ui, "Save").clicked() {
+                                act = EdAct::Save;
+                            }
+                            if can_connect && flat_button(ui, "Save & connect").clicked() {
+                                act = EdAct::Connect;
+                            }
                         }
                     });
                 });
                 egui::ScrollArea::vertical().auto_shrink(false).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
-                    self.editor_fields(ui, &mut ed, &mut act);
+                    ui.add_enabled_ui(!read_only, |ui| self.editor_fields(ui, &mut ed, &mut act));
                     if is_new {
                         match &ed {
                             Editor::Host(x) => self.sync_new_scope_row(ui, "host", x.group),
@@ -456,6 +483,12 @@ impl App {
             EdAct::Save => {
                 ctx.data_mut(|d| d.insert_temp(tried, false));
                 self.commit_editor(ed);
+            }
+            EdAct::Connect if read_only => {
+                if let Editor::Host(h) = &ed {
+                    self.connect_host(h.id);
+                }
+                self.editor = Editor::None;
             }
             EdAct::Connect => {
                 ctx.data_mut(|d| d.insert_temp(tried, false));

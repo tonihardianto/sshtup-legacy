@@ -665,6 +665,19 @@ impl App {
     // ------------------------------------------------------------- deletes --
 
     pub fn do_delete(&mut self, d: Del) {
+        let guarded = match &d {
+            Del::Host(id) => Some(("host", *id)),
+            Del::Group(id) => Some(("group", *id)),
+            Del::Key(id) => Some(("key", *id)),
+            Del::Identity(id) => Some(("identity", *id)),
+            Del::Forward(id) => Some(("forward", *id)),
+            Del::Snippet(id) => Some(("snippet", *id)),
+            _ => None,
+        };
+        if guarded.map(|(k, id)| self.item_read_only(k, id)).unwrap_or(false) {
+            self.notify("You are a viewer in this team and cannot delete its items.".into(), AMBER());
+            return;
+        }
         let v = &mut self.vault;
         match d {
             Del::Host(id) => {

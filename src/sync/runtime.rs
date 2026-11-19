@@ -19,6 +19,8 @@ pub struct ScopeKey {
     pub scope: String,
     pub key: [u8; 32],
     pub epoch: u32,
+    /// a viewer of a team only takes what others wrote
+    pub read_only: bool,
 }
 
 /// Hands the worker the snapshot taken on the UI thread and collects what the engine wants to change.
@@ -72,7 +74,7 @@ pub fn run_round<R: Remote>(remote: R, device: &str, scopes: &[ScopeKey], snap: 
     e.cursors = cursors;
     let mut out = RoundOut::default();
     for s in scopes {
-        let r = match e.tick(&s.scope, &s.key, s.epoch, now) {
+        let r = match e.tick_as(&s.scope, &s.key, s.epoch, now, s.read_only) {
             Ok(r) => r,
             // one team going wrong must not stop personal sync
             Err(err) if s.scope != "u" && err != SyncError::Unauthorized && !matches!(err, SyncError::Network(_)) => {
@@ -168,7 +170,7 @@ impl App {
         let ctx2 = ctx.clone();
         std::thread::spawn(move || {
             let api = Api::new(&cfg.server, Some(cfg.token.clone()));
-            let mut scopes = vec![ScopeKey { scope: "u".into(), key: sync_key, epoch: 1 }];
+            let mut scopes = vec![ScopeKey { scope: "u".into(), key: sync_key, epoch: 1, read_only: false }];
             let mut listed = None;
             if let Some(xs) = x_secret {
                 // a failure here only means no team sync this round
@@ -186,7 +188,7 @@ impl App {
                 if let Ok(teams) = got {
                     for t in &teams {
                         if let (true, Some(k)) = (t.ready(), &t.key) {
-                            scopes.push(ScopeKey { scope: super::teams::scope_of(t.id), key: **k, epoch: t.epoch });
+                            scopes.push(ScopeKey { scope: super::teams::scope_of(t.id), key: **k, epoch: t.epoch, read_only: !t.can_write() });
                         }
                     }
                     listed = Some(teams);
@@ -212,7 +214,7 @@ impl App {
                     let old: Vec<i64> = cfg.teams.iter().map(|t| t.id).collect();
                     cfg_now.teams = teams
                         .iter()
-                        .filter_map(|t| t.key.as_ref().map(|k| super::teams::TeamCfg { id: t.id, name: t.name.clone(), epoch: t.epoch, owner: t.owner, key: super::to_hex(&**k) }))
+                        .filter_map(|t| t.key.as_ref().map(|k| super::teams::TeamCfg { id: t.id, name: t.name.clone(), epoch: t.epoch, owner: t.owner, role: t.role.clone(), key: super::to_hex(&**k) }))
                         .collect();
                     for gone in old.iter().filter(|id| !teams.iter().any(|t| t.id == **id)) {
                         let n = super::teams::release_team(self.sync_rt.state.as_mut().unwrap(), &super::teams::scope_of(*gone), now);
@@ -291,7 +293,7 @@ mod tests {
 
     #[test]
     fn server_down_sets_status_not_panic() {
-        let r = run_round(Api::new("http://127.0.0.1:1", Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1 }], vec![], HashMap::new(), 1);
+        let r = run_round(Api::new("http://127.0.0.1:1", Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1, read_only: false }], vec![], HashMap::new(), 1);
         let e = r.err().unwrap();
         assert!(matches!(e, SyncError::Network(_)));
         assert!(describe(&e).contains("Cannot reach"));
@@ -310,7 +312,7 @@ mod tests {
                 let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n\r\n<html>oops</html");
             }
         });
-        let r = run_round(Api::new(&format!("http://{addr}"), Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1 }], vec![], HashMap::new(), 1);
+        let r = run_round(Api::new(&format!("http://{addr}"), Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1, read_only: false }], vec![], HashMap::new(), 1);
         assert!(r.is_err());
     }
 
@@ -328,7 +330,7 @@ mod tests {
                 let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"items\":[{\"");
             }
         });
-        let r = run_round(Api::new(&format!("http://{addr}"), Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1 }], vec![], HashMap::new(), 1);
+        let r = run_round(Api::new(&format!("http://{addr}"), Some("t".into())), "d", &[ScopeKey { scope: "u".into(), key: [1; 32], epoch: 1, read_only: false }], vec![], HashMap::new(), 1);
         assert!(r.is_err());
     }
 
@@ -352,7 +354,7 @@ mod tests {
         let (mut a, mut b) = (mk("a"), mk("b"));
         let round = |d: &mut Dev, now: u64| {
             let snap = VaultStore { vault: &mut d.vault, state: &mut d.state, device: d.id.clone() }.snapshot(now);
-            let out = run_round(Api::new(&base, Some(d.api_token.clone())), &d.id, &[ScopeKey { scope: "u".into(), key, epoch: 1 }], snap, d.state.cursors.clone(), now).unwrap();
+            let out = run_round(Api::new(&base, Some(d.api_token.clone())), &d.id, &[ScopeKey { scope: "u".into(), key, epoch: 1, read_only: false }], snap, d.state.cursors.clone(), now).unwrap();
             let mut st = VaultStore { vault: &mut d.vault, state: &mut d.state, device: d.id.clone() };
             st.apply(out.applied, now);
             mark_all(&mut st, out.synced);
@@ -401,9 +403,9 @@ mod tests {
         let snap = VaultStore { vault: &mut d.vault, state: &mut d.state, device: d.id.clone() }.snapshot(now);
         let api = Api::new(base, Some(d.token.clone()));
         let teams = sync_client::teams::my_teams(&api, &d.x_secret).unwrap();
-        let mut scopes = vec![ScopeKey { scope: "u".into(), key: d.sync_key, epoch: 1 }];
+        let mut scopes = vec![ScopeKey { scope: "u".into(), key: d.sync_key, epoch: 1, read_only: false }];
         for t in &teams {
-            scopes.push(ScopeKey { scope: super::super::teams::scope_of(t.id), key: **t.key.as_ref().unwrap(), epoch: t.epoch });
+            scopes.push(ScopeKey { scope: super::super::teams::scope_of(t.id), key: **t.key.as_ref().unwrap(), epoch: t.epoch, read_only: false });
         }
         let out = run_round(Api::new(base, Some(d.token.clone())), &d.id, &scopes, snap, d.state.cursors.clone(), now).unwrap();
         let mut st = VaultStore { vault: &mut d.vault, state: &mut d.state, device: d.id.clone() };
@@ -426,7 +428,7 @@ mod tests {
         let id = sync_client::teams::create_team(&oapi, &kp.public, "ops").unwrap();
         let who = sync_client::teams::lookup(&oapi, id, "m@x.io").unwrap();
         let key = sync_client::teams::my_teams(&oapi, &o.x_secret).unwrap()[0].key.clone().unwrap();
-        sync_client::teams::add_member(&oapi, id, &who, &key).unwrap();
+        sync_client::teams::add_member(&oapi, id, &who, &key, "editor").unwrap();
 
         let now = now_ms();
         o.vault.hosts.push(Host { id: 41, label: "shared-web".into(), ..Default::default() });

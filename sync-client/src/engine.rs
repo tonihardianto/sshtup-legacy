@@ -59,6 +59,11 @@ impl<S: Store, R: Remote> Engine<S, R> {
 
     /// One round for one scope: take what is new on the server, then send what changed here.
     pub fn tick(&mut self, scope: &str, key: &[u8; 32], epoch: u32, now: u64) -> Result<TickReport, SyncError> {
+        self.tick_as(scope, key, epoch, now, false)
+    }
+
+    /// Like `tick`; with `read_only` the round only takes (a viewer of a team has nothing to send).
+    pub fn tick_as(&mut self, scope: &str, key: &[u8; 32], epoch: u32, now: u64, read_only: bool) -> Result<TickReport, SyncError> {
         use base64::Engine as _;
         let mut report = TickReport::default();
         let local: HashMap<String, LocalItem> = self.store.snapshot(now).into_iter().filter(|i| i.scope == scope).map(|i| (i.id.clone(), i)).collect();
@@ -104,7 +109,7 @@ impl<S: Store, R: Remote> Engine<S, R> {
 
         // 2. push what changed here and did not just lose to the server
         let mut out: Vec<(LocalItem, WireItem)> = Vec::new();
-        for l in local.values().filter(|l| l.dirty && !incoming.contains_key(&l.id)) {
+        for l in local.values().filter(|l| !read_only && l.dirty && !incoming.contains_key(&l.id)) {
             // a clock that runs ahead must not make the server refuse the item
             let updated_at = l.stamp.updated_at.min(now);
             let meta = ItemMeta { scope: scope.to_string(), id: l.id.clone(), updated_at, deleted: l.stamp.deleted, epoch };
@@ -248,6 +253,17 @@ mod tests {
         assert_eq!(tick(&mut b, 100).pulled, 1);
         assert_eq!(b.store.text("host:1").as_deref(), Some("one"));
         assert!(!b.store.items["host:1"].dirty);
+    }
+    #[test]
+    fn a_read_only_round_pulls_but_sends_nothing() {
+        let (mut a, mut b, _) = pair();
+        a.store.edit("host:1", "one", 10);
+        tick(&mut a, 100);
+        b.store.edit("host:2", "two", 20);
+        let r = b.tick_as("u", &KEY, 1, 100, true).unwrap();
+        assert_eq!((r.pulled, r.pushed), (1, 0));
+        assert!(b.store.items["host:2"].dirty);
+        assert_eq!(tick(&mut a, 100).pulled, 0);
     }
     #[test]
     fn edit_propagates() {

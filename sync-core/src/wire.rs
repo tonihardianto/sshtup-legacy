@@ -127,6 +127,13 @@ pub struct TeamLookupResp {
 pub struct TeamAddMemberReq {
     pub email: String,
     pub sealed_team_key: String,
+    /// "admin", "editor" or "viewer"; an older client sends none, which means editor
+    #[serde(default)]
+    pub role: Option<String>,
+}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TeamSetRoleReq {
+    pub role: String,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MemberInfo {
@@ -140,6 +147,9 @@ pub struct TeamInfo {
     pub id: i64,
     pub name: String,
     pub owner: bool,
+    /// this account's role: "owner", "admin", "editor" or "viewer" (an older server sends none)
+    #[serde(default)]
+    pub my_role: String,
     /// the team's current epoch (raised when someone is removed)
     pub epoch: u32,
     /// the epoch the sealed key below belongs to; behind `epoch` until the owner has rotated the key
@@ -176,4 +186,69 @@ pub struct RotateItemsResp {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct TeamsResp {
     pub teams: Vec<TeamInfo>,
+}
+
+/// What a team member may do. `member` is what servers before roles called an editor.
+pub mod roles {
+    pub const OWNER: &str = "owner";
+    pub const ADMIN: &str = "admin";
+    pub const EDITOR: &str = "editor";
+    pub const VIEWER: &str = "viewer";
+
+    pub fn normalize(role: &str) -> &'static str {
+        match role {
+            "owner" => OWNER,
+            "admin" => ADMIN,
+            "viewer" => VIEWER,
+            _ => EDITOR,
+        }
+    }
+    /// May add, change and delete the team's items.
+    pub fn can_write(role: &str) -> bool {
+        normalize(role) != VIEWER
+    }
+    /// May add people and change the roles of editors and viewers.
+    pub fn can_manage(role: &str) -> bool {
+        matches!(normalize(role), OWNER | ADMIN)
+    }
+    /// The role `by` may hand out. Only the owner makes admins.
+    pub fn can_grant(by: &str, role: &str) -> bool {
+        match normalize(by) {
+            OWNER => matches!(role, "admin" | "editor" | "viewer"),
+            ADMIN => matches!(role, "editor" | "viewer"),
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::roles::*;
+
+    #[test]
+    fn the_old_member_role_is_an_editor() {
+        assert_eq!(normalize("member"), EDITOR);
+        assert_eq!(normalize(""), EDITOR);
+        assert_eq!(normalize("viewer"), VIEWER);
+    }
+
+    #[test]
+    fn only_viewers_cannot_write() {
+        assert!(can_write("owner") && can_write("admin") && can_write("editor") && can_write("member"));
+        assert!(!can_write("viewer"));
+    }
+
+    #[test]
+    fn only_owner_and_admin_manage() {
+        assert!(can_manage("owner") && can_manage("admin"));
+        assert!(!can_manage("editor") && !can_manage("viewer") && !can_manage("member"));
+    }
+
+    #[test]
+    fn an_admin_cannot_make_admins() {
+        assert!(can_grant("owner", "admin") && can_grant("owner", "viewer"));
+        assert!(can_grant("admin", "editor") && can_grant("admin", "viewer"));
+        assert!(!can_grant("admin", "admin") && !can_grant("editor", "viewer"));
+        assert!(!can_grant("owner", "owner"));
+    }
 }
