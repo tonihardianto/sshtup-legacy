@@ -18,6 +18,8 @@ pub enum CardAct {
     Delete,
     /// the n-th entry of `HostCardIn::moves`
     Move(usize),
+    /// into a group (None: the top level)
+    MoveGroup(Option<u64>),
 }
 
 /// The text inside the avatar: the last number of an IPv4 address (`.3`), otherwise the first two letters.
@@ -62,6 +64,9 @@ pub struct HostCardIn<'a> {
     pub team: String,
     /// "Move to ..." labels for the menu
     pub moves: Vec<String>,
+    /// other groups the host can go to: (id, name); the host's current group is left out
+    pub groups: Vec<(u64, String)>,
+    pub in_group: bool,
 }
 
 impl HostCardIn<'_> {
@@ -96,7 +101,7 @@ fn icon_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, draw: impl FnOnce(&e
     r
 }
 
-fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], act: &mut CardAct) {
+fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], groups: &[(u64, String)], in_group: bool, act: &mut CardAct) {
     ui.set_min_width(150.0);
     ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
     ui.spacing_mut().item_spacing.y = 2.0;
@@ -107,9 +112,24 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], act: &mut CardAct) 
     }
     items.extend([(Icon::Pencil, "Edit", CardAct::Edit), (Icon::Copy, "Duplicate", CardAct::Duplicate), (pin_icon, pin, CardAct::Pin), (Icon::Trash, "Delete", CardAct::Delete)]);
     for (icon, text, a) in items {
+        if a == CardAct::Delete && (!groups.is_empty() || in_group) {
+            ui.menu_button("Move to group", |ui| {
+                ui.set_min_width(150.0);
+                if in_group && ui.button("No group").clicked() {
+                    *act = CardAct::MoveGroup(None);
+                    ui.close();
+                }
+                for (gid, name) in groups {
+                    if ui.button(name).clicked() {
+                        *act = CardAct::MoveGroup(Some(*gid));
+                        ui.close();
+                    }
+                }
+            });
+        }
         if a == CardAct::Delete && !moves.is_empty() {
             // one entry with a submenu, however many teams there are
-            ui.menu_button("Move to…", |ui| {
+            ui.menu_button("Move to team", |ui| {
                 ui.set_min_width(150.0);
                 for (i, m) in moves.iter().enumerate() {
                     if ui.button(m.trim_start_matches("Move to ")).clicked() {
@@ -151,7 +171,7 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         p.rect_stroke(rect, 10.0, Stroke::new(1.5, BLUE()), StrokeKind::Inside);
     }
 
-    out.resp.context_menu(|ui| menu_items(ui, h, &c.moves, &mut act));
+    out.resp.context_menu(|ui| menu_items(ui, h, &c.moves, &c.groups, c.in_group, &mut act));
 
     // avatar
     let av = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::splat(40.0));
@@ -179,7 +199,7 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         let mut open = false;
         egui::Popup::menu(&more).gap(6.0).show(|ui| {
             open = true;
-            menu_items(ui, h, &c.moves, &mut act);
+            menu_items(ui, h, &c.moves, &c.groups, c.in_group, &mut act);
         });
         ui.ctx().data_mut(|d| d.insert_temp(menu_key, open));
         if h.protocol == Protocol::Ssh {

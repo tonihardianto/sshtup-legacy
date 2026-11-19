@@ -469,7 +469,7 @@ impl App {
             return;
         }
         ui.separator();
-        ui.menu_button("Move to…", |ui| {
+        ui.menu_button("Move to team", |ui| {
             ui.set_min_width(150.0);
             for (scope, label) in targets {
                 if ui.button(label.trim_start_matches("Move to ")).clicked() {

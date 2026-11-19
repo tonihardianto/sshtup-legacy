@@ -874,6 +874,7 @@ impl App {
                                 acts.push(HAct::EditGroup(g.id));
                                 ui.close();
                             }
+                            self.group_menu(ui, "group", g.id);
                             self.move_menu(ui, "group", g.id);
                         });
                         if e.clicked() {
@@ -892,6 +893,66 @@ impl App {
         self.apply_host_acts(acts);
     }
 
+    /// Groups an item can be moved into (not its own group, and for a group not itself or anything inside it).
+    pub(crate) fn group_targets(&self, kind: &str, id: u64) -> Vec<(u64, String)> {
+        let cur = if kind == "host" { self.vault.host(Some(id)).and_then(|h| h.group) } else { self.vault.groups.iter().find(|g| g.id == id).and_then(|g| g.parent) };
+        let mut banned = vec![];
+        if kind == "group" {
+            banned.push(id);
+            let mut i = 0;
+            while i < banned.len() {
+                let b = banned[i];
+                let kids: Vec<u64> = self.vault.groups.iter().filter(|g| g.parent == Some(b) && !banned.contains(&g.id)).map(|g| g.id).collect();
+                banned.extend(kids);
+                i += 1;
+            }
+        }
+        let mut v: Vec<(u64, String)> = self.vault.groups.iter().filter(|g| Some(g.id) != cur && !banned.contains(&g.id) && !self.item_read_only("group", g.id)).map(|g| (g.id, g.name.clone())).collect();
+        v.sort_by_key(|a| a.1.to_lowercase());
+        v
+    }
+
+    /// "Move to group" for a group's menu.
+    fn group_menu(&self, ui: &mut egui::Ui, kind: &str, id: u64) {
+        let targets = self.group_targets(kind, id);
+        let top = self.vault.groups.iter().find(|g| g.id == id).map(|g| g.parent.is_some()).unwrap_or(false);
+        if targets.is_empty() && !top {
+            return;
+        }
+        ui.menu_button("Move to group", |ui| {
+            ui.set_min_width(150.0);
+            if top && ui.button("No group").clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), (kind.to_string(), id, None::<u64>)));
+                ui.close();
+            }
+            for (gid, name) in targets {
+                if ui.button(name).clicked() {
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), (kind.to_string(), id, Some(gid))));
+                    ui.close();
+                }
+            }
+        });
+    }
+
+    /// Carries out a "Move to group" chosen in a menu. An item moved into a team's group joins that team.
+    pub(crate) fn group_move_pump(&mut self, ctx: &egui::Context) {
+        let Some((kind, id, target)) = ctx.data_mut(|d| d.remove_temp::<(String, u64, Option<u64>)>(egui::Id::new("group_req"))) else { return };
+        if self.item_read_only(&kind, id) {
+            return;
+        }
+        if kind == "host" {
+            if let Some(h) = self.vault.hosts.iter_mut().find(|h| h.id == id) {
+                h.group = target;
+            }
+        } else if let Some(g) = self.vault.groups.iter_mut().find(|g| g.id == id) {
+            g.parent = target;
+        }
+        self.dirty = true;
+        if target.is_some() {
+            self.sync_place_new(&kind, id);
+        }
+    }
+
     fn host_cards(&self, ui: &mut egui::Ui, hosts: &[Host], w: f32, live_ids: &std::collections::HashSet<u64>, acts: &mut Vec<HAct>) {
         use crate::hostcard::{host_card, CardAct, HostCardIn};
         ui.horizontal_wrapped(|ui| {
@@ -899,8 +960,11 @@ impl App {
                 let color = h.group.and_then(|g| self.vault.groups.iter().find(|x| x.id == g)).map(|g| icon_color(&g.name)).unwrap_or_else(|| icon_color(&h.address));
                 let team = self.team_tag("host", h.id).trim().trim_start_matches('·').trim().to_string();
                 let targets = self.move_targets("host", h.id);
-                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), team, moves: targets.iter().map(|t| t.1.clone()).collect() };
+                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), team, moves: targets.iter().map(|t| t.1.clone()).collect(), groups: self.group_targets("host", h.id), in_group: h.group.is_some() };
                 match host_card(ui, w, &c) {
+                    CardAct::MoveGroup(g) => {
+                        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), ("host".to_string(), h.id, g)));
+                    }
                     CardAct::Move(i) => {
                         if let Some(t) = targets.get(i) {
                             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), ("host".to_string(), h.id, t.0.clone())));

@@ -14,6 +14,7 @@ All notable changes to SSHTUP. Versions are the tags of the
   the chosen team when you can edit it.
 - Teams: **Move to team / Move to Personal** in the right-click menu of hosts (also the "..." menu), groups, forwards and
   snippets. Moving a group takes its hosts with it. A move that lets the team read a saved password or key asks first.
+- **Move to group** in the menu of hosts and groups: put a host or group into another group, or back to the top level.
 
 ## 0.3.0
 
