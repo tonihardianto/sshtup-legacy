@@ -1365,6 +1365,7 @@ ui.horizontal(|ui| {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
         self.sync_move_pump(ctx);
+        self.group_move_pump(ctx);
         if let Some(d) = self.confirm.clone() {
             let mut decided: Option<bool> = None;
             let m = egui::Modal::new(egui::Id::new("delete_modal")).frame(egui::Frame::popup(&ctx.global_style()).inner_margin(Margin::symmetric(28, 24))).show(ctx, |ui| {
