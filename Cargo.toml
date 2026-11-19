@@ -1,0 +1,43 @@
+[workspace]
+members = [".", "sync-core", "sync-server", "sync-client"]
+resolver = "2"
+
+[package]
+name = "sshtup"
+version = "0.4.1"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+argon2 = "0.6"
+chacha20poly1305 = "0.11"
+eframe = "0.37.0"
+getrandom = "0.4"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+portable-pty = "0.9.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+ureq = "3"
+vt100 = "0.18.1"
+winit = "0.30.13"
+zeroize = "1"
+sha2 = "0.11"
+base64 = "0.23"
+sync-core = { path = "sync-core" }
+sync-client = { path = "sync-client" }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "crypto-rust", "async-io"] }
+
+# Argon2 is slow without optimisation; keep it fast in debug builds too.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+
+[dev-dependencies]
+sync-server = { path = "sync-server" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+raw-window-handle = "0.6"
+objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSView", "NSButton", "NSControl", "NSResponder", "NSApplication"] }
+objc2-foundation = { version = "0.2", features = ["NSGeometry"] }

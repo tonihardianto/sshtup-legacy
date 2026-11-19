@@ -1,0 +1,49 @@
+name: build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # let every platform report, so one failure does not hide the others
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # the window toolkit (eframe/winit) needs these on Linux
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxcb1-dev libgl1-mesa-dev libegl1-mesa-dev
+
+      # the app and the server, as a person would build them
+      - name: Build
+        run: cargo build --workspace --bins
+
+      # the shared-terminal test starts the built app in join mode, so it must exist first
+      - name: Test
+        run: cargo test --workspace
+        # Windows support is not finished (see PLATFORMS.md): show its test results without failing the run
+        continue-on-error: ${{ runner.os == 'Windows' }}
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v7
+        with:
+          name: sshtup-${{ matrix.os }}
+          path: |
+            target/debug/sshtup
+            target/debug/sshtup.exe
+            target/debug/sshtup_sync_server
+            target/debug/sshtup_sync_server.exe
+          if-no-files-found: ignore

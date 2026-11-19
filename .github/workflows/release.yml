@@ -1,0 +1,232 @@
+name: release
+
+# Push a tag like v0.1.0 to build the app for every platform and publish it as a
+# GitHub release. Changes to this file build the packages but publish nothing.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin }
+          - { name: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin }
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev libxcb1-dev libgl1-mesa-dev libegl1-mesa-dev
+
+      - name: The tag must match the version in Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - name: Build the app
+        run: cargo build --release --locked --bin sshtup --target ${{ matrix.target }}
+
+      - name: Build the sync server
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked -p sync-server --target ${{ matrix.target }}
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          app=dist/SSHTUP.app
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" icon.iconset
+          cp target/${{ matrix.target }}/release/sshtup "$app/Contents/MacOS/sshtup"
+          for s in 16 32 64 128 256 512; do
+            sips -z $s $s assets/icon.png --out icon.iconset/icon_${s}x${s}.png >/dev/null
+          done
+          iconutil -c icns icon.iconset -o "$app/Contents/Resources/icon.icns"
+          cat > "$app/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>SSHTUP</string>
+            <key>CFBundleDisplayName</key><string>SSHTUP</string>
+            <key>CFBundleIdentifier</key><string>io.github.tonihardianto.sshtup</string>
+            <key>CFBundleExecutable</key><string>sshtup</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$version</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          # unsigned: an ad-hoc signature keeps Apple silicon willing to start it
+          codesign --force --deep --sign - "$app"
+          (cd dist && ditto -c -k --keepParent SSHTUP.app ../sshtup-${{ matrix.name }}.zip)
+          # a disk image with the usual "drag to Applications" shortcut
+          mkdir dmgroot
+          cp -R "$app" dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname SSHTUP -srcfolder dmgroot -ov -format UDZO sshtup-${{ matrix.name }}.dmg
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/sshtup dist/
+          cp assets/icon.png dist/sshtup.png
+          cp README.md LICENSE dist/
+          tar -C dist -czf sshtup-${{ matrix.name }}.tar.gz .
+          rm -rf dist
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/sshtup_sync_server dist/
+          cp SYNC.md RELAY.md LICENSE dist/
+          tar -C dist -czf sshtup-sync-server-${{ matrix.name }}.tar.gz .
+
+      - name: Package (Linux .deb and AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          bin=target/${{ matrix.target }}/release/sshtup
+          cat > sshtup.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=SSHTUP
+          Comment=SSH client with self-hosted sync
+          Exec=sshtup
+          Icon=sshtup
+          Terminal=false
+          Categories=Network;RemoteAccess;
+          DESKTOP
+
+          # .deb
+          root=deb/sshtup_${version}_amd64
+          mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/applications" "$root/usr/share/icons/hicolor/512x512/apps"
+          install -m 755 "$bin" "$root/usr/bin/sshtup"
+          install -m 644 sshtup.desktop "$root/usr/share/applications/sshtup.desktop"
+          install -m 644 assets/icon.png "$root/usr/share/icons/hicolor/512x512/apps/sshtup.png"
+          cat > "$root/DEBIAN/control" <<CONTROL
+          Package: sshtup
+          Version: $version
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Depends: libc6 (>= 2.35), libxkbcommon0, libgl1, libegl1
+          Recommends: openssh-client
+          Maintainer: tonihardianto <tonihardianto@users.noreply.github.com>
+          Description: SSH client with self-hosted sync
+           A native desktop SSH client with an optional sync server you host yourself.
+          CONTROL
+          dpkg-deb --build --root-owner-group "$root" sshtup-${{ matrix.name }}.deb
+
+          # AppImage (appimagetool 1.9.1, checked against a known checksum)
+          mkdir -p AppDir/usr/bin
+          install -m 755 "$bin" AppDir/usr/bin/sshtup
+          cp sshtup.desktop AppDir/sshtup.desktop
+          cp assets/icon.png AppDir/sshtup.png
+          ln -s usr/bin/sshtup AppDir/AppRun
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool" | sha256sum -c -
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir sshtup-${{ matrix.name }}.AppImage
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/${{ matrix.target }}/release/sshtup.exe dist/
+          cp README.md LICENSE PLATFORMS.md dist/
+          7z a sshtup-${{ matrix.name }}.zip ./dist/*
+          # the program on its own, no install needed
+          cp dist/sshtup.exe sshtup-${{ matrix.name }}.exe
+
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          choco install innosetup -y --no-progress
+          cat > installer.iss <<'ISS'
+          [Setup]
+          AppName=SSHTUP
+          AppVersion=@VERSION@
+          DefaultDirName={autopf}\SSHTUP
+          DefaultGroupName=SSHTUP
+          PrivilegesRequired=lowest
+          OutputDir=.
+          OutputBaseFilename=sshtup-setup-@NAME@
+          SetupIconFile=assets\icon.ico
+          UninstallDisplayIcon={app}\sshtup.exe
+          Compression=lzma2
+          ArchitecturesInstallIn64BitMode=x64compatible
+          [Files]
+          Source: "target\@TARGET@\release\sshtup.exe"; DestDir: "{app}"
+          Source: "LICENSE"; DestDir: "{app}"
+          [Icons]
+          Name: "{group}\SSHTUP"; Filename: "{app}\sshtup.exe"
+          ISS
+          sed -i "s/@VERSION@/$version/; s/@NAME@/${{ matrix.name }}/; s/@TARGET@/${{ matrix.target }}/" installer.iss
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" installer.iss
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            sshtup-*.zip
+            sshtup-*.tar.gz
+            sshtup-*.dmg
+            sshtup-*.deb
+            sshtup-*.AppImage
+            sshtup-*.exe
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: packages
+          pattern: package-*
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: packages
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" packages/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag
