@@ -45,6 +45,8 @@ pub struct SyncUi {
     pub candidate: Option<(i64, sync_client::teams::MemberLookup)>,
     /// (item id, scope, warning) waiting for a yes before a secret is shared with a team
     pub pending_move: Option<(String, String, String)>,
+    /// a move started from a list menu that needs a yes: (kind, id, scope, warning)
+    pub move_ask: Option<(String, u64, String, String)>,
     /// where a new item will live, chosen in its form (None until the form first draws; "u" is only me)
     pub new_scope: Option<String>,
     /// (team id, user id, email) waiting for a yes before someone is removed
@@ -437,6 +439,92 @@ impl App {
         });
         if cur != "u" {
             ui.label(RichText::new("Every team member can read saved passwords and keys on this item.").size(11.5).color(AMBER()));
+        }
+    }
+
+    /// Where this item can be moved from its list menu: (scope, label). Empty without teams, or for a viewer.
+    pub fn move_targets(&self, kind: &str, id: u64) -> Vec<(String, String)> {
+        let Some(cfg) = self.vault.sync.as_ref() else { return vec![] };
+        if cfg.teams.is_empty() || self.sync_rt.state.is_none() || self.item_read_only(kind, id) {
+            return vec![];
+        }
+        let cur = self.item_scope(kind, id);
+        let mut out = vec![];
+        if cur != "u" {
+            out.push(("u".to_string(), "Move to Personal".to_string()));
+        }
+        for t in cfg.teams.iter().filter(|t| t.can_write()) {
+            let sc = super::teams::scope_of(t.id);
+            if sc != cur {
+                out.push((sc, format!("Move to team {}", t.name)));
+            }
+        }
+        out
+    }
+
+    /// The "Move to ..." entries for a list menu. The choice is picked up by `sync_move_pump` on the next frame.
+    pub fn move_menu(&self, ui: &mut egui::Ui, kind: &str, id: u64) {
+        let targets = self.move_targets(kind, id);
+        if targets.is_empty() {
+            return;
+        }
+        ui.separator();
+        for (scope, label) in targets {
+            if icon_text_button(ui, crate::icons::Icon::Users, &label).clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), (kind.to_string(), id, scope)));
+                ui.close();
+            }
+        }
+    }
+
+    /// Moves an item (or a whole group) to another vault. A secret that becomes readable by a team waits for a yes.
+    pub fn move_item(&mut self, kind: &str, id: u64, scope: &str, confirmed: bool) {
+        let Some(cfg) = self.vault.sync.clone() else { return };
+        let item = super::state::item_id(kind, id);
+        let vault = &self.vault;
+        let Some(state) = self.sync_rt.state.as_mut() else { return };
+        let res = if kind == "group" {
+            super::teams::share_group(state, vault, id, scope, confirmed, &cfg.device_id, now_ms()).map(|n| n)
+        } else {
+            super::teams::move_to_scope(state, vault, &item, scope, confirmed, &cfg.device_id, now_ms()).map(|_| 1)
+        };
+        match res {
+            Ok(n) => {
+                self.sync_rt.ui.move_ask = None;
+                self.sync_rt.want_now = true;
+                self.dirty = true;
+                let to = if scope == "u" { "Personal".to_string() } else { format!("team {}", self.vault_name(scope)) };
+                self.notify(format!("{n} item{} moved to {to}", if n == 1 { "" } else { "s" }), GREEN());
+            }
+            Err(super::teams::MoveErr::NeedsConfirm(w)) => self.sync_rt.ui.move_ask = Some((kind.to_string(), id, scope.to_string(), w)),
+            Err(_) => {}
+        }
+    }
+
+    /// Runs once a frame: carries out a move chosen in a list menu, and asks before sharing secrets with a team.
+    pub fn sync_move_pump(&mut self, ctx: &egui::Context) {
+        if let Some((kind, id, scope)) = ctx.data_mut(|d| d.remove_temp::<(String, u64, String)>(egui::Id::new("move_req"))) {
+            self.move_item(&kind, id, &scope, false);
+        }
+        let Some((kind, id, scope, warn)) = self.sync_rt.ui.move_ask.clone() else { return };
+        let to = self.vault_name(&scope);
+        let (act, closed) = app_modal(ctx, "move_ask_modal", "Share with the team?", |ui| {
+            ui.set_width(340.0);
+            label_muted(ui, &format!("Move to {to}."));
+            ui.add_space(4.0);
+            ui.label(RichText::new(&warn).size(12.5).color(AMBER()));
+            let mut yes = false;
+            let mut no = false;
+            modal_buttons(ui, |ui| {
+                yes = danger_button(ui, "Move it").clicked();
+                no = flat_button(ui, "Cancel").clicked();
+            });
+            (yes, no)
+        });
+        if act.0 {
+            self.move_item(&kind, id, &scope, true);
+        } else if act.1 || closed {
+            self.sync_rt.ui.move_ask = None;
         }
     }
 

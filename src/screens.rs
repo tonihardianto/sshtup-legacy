@@ -869,6 +869,13 @@ impl App {
                     for g in &groups {
                         let n = self.vault.hosts.iter().filter(|h| h.group == Some(g.id)).count();
                         let (c, e) = item_card(ui, size, &g.name, &format!("{} host{}", n, if n == 1 { "" } else { "s" }), "icon:group", icon_color(&g.name), None, "Edit", 40.0, false);
+                        c.context_menu(|ui| {
+                            if icon_text_button(ui, crate::icons::Icon::Pencil, "Edit").clicked() {
+                                acts.push(HAct::EditGroup(g.id));
+                                ui.close();
+                            }
+                            self.move_menu(ui, "group", g.id);
+                        });
                         if e.clicked() {
                             acts.push(HAct::EditGroup(g.id));
                         } else if c.clicked() {
@@ -891,8 +898,14 @@ impl App {
             for h in hosts {
                 let color = h.group.and_then(|g| self.vault.groups.iter().find(|x| x.id == g)).map(|g| icon_color(&g.name)).unwrap_or_else(|| icon_color(&h.address));
                 let team = self.team_tag("host", h.id).trim().trim_start_matches('·').trim().to_string();
-                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), team };
+                let targets = self.move_targets("host", h.id);
+                let c = HostCardIn { host: h, user: h.resolved_username(&self.vault.identities), color, live: live_ids.contains(&h.id), team, moves: targets.iter().map(|t| t.1.clone()).collect() };
                 match host_card(ui, w, &c) {
+                    CardAct::Move(i) => {
+                        if let Some(t) = targets.get(i) {
+                            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), ("host".to_string(), h.id, t.0.clone())));
+                        }
+                    }
                     CardAct::None => {}
                     CardAct::Open => acts.push(HAct::Connect(h.id)),
                     CardAct::Sftp => acts.push(HAct::Sftp(h.id)),
@@ -1203,6 +1216,13 @@ impl App {
                 let hl = self.host_label(f.host);
                 let live = self.forwards_live.contains_key(&f.id);
                 let (c, r) = item_card(ui, Vec2::new(w, 60.0), &f.display_label(&hl), &if f.label.is_empty() { f.kind.name().to_string() } else { f.describe(&hl) }, "icon:forward", icon_color(f.kind.name()), if live { Some(GREEN()) } else { None }, if live { "Stop" } else { "Start" }, 56.0, false);
+                c.context_menu(|ui| {
+                    if icon_text_button(ui, crate::icons::Icon::Pencil, "Edit").clicked() {
+                        edit = Some(f.clone());
+                        ui.close();
+                    }
+                    self.move_menu(ui, "forward", f.id);
+                });
                 if r.clicked() {
                     toggle_id = Some(f.id);
                 } else if c.clicked() {
@@ -1246,6 +1266,13 @@ impl App {
             for s in self.vault.snippets.iter().filter(|s| self.in_vault("snippet", s.id)) {
                 let first = s.script.lines().next().unwrap_or("").to_string();
                 let (c, r) = item_card(ui, Vec2::new(w, 60.0), &s.display_label(), &format!("{}{}", first, self.team_tag("snippet", s.id)), "icon:snippet", icon_color(&s.label), None, "Run", 48.0, false);
+                c.context_menu(|ui| {
+                    if icon_text_button(ui, crate::icons::Icon::Pencil, "Edit").clicked() {
+                        edit = Some(s.clone());
+                        ui.close();
+                    }
+                    self.move_menu(ui, "snippet", s.id);
+                });
                 if r.clicked() {
                     run = Some(s.id);
                 } else if c.clicked() {

@@ -16,6 +16,8 @@ pub enum CardAct {
     Duplicate,
     Pin,
     Delete,
+    /// the n-th entry of `HostCardIn::moves`
+    Move(usize),
 }
 
 /// The text inside the avatar: the last number of an IPv4 address (`.3`), otherwise the first two letters.
@@ -58,6 +60,8 @@ pub struct HostCardIn<'a> {
     pub live: bool,
     /// "Team X" when the host belongs to a team.
     pub team: String,
+    /// "Move to ..." labels for the menu
+    pub moves: Vec<String>,
 }
 
 impl HostCardIn<'_> {
@@ -92,7 +96,7 @@ fn icon_button(ui: &mut egui::Ui, rect: Rect, id: egui::Id, draw: impl FnOnce(&e
     r
 }
 
-fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
+fn menu_items(ui: &mut egui::Ui, h: &Host, moves: &[String], act: &mut CardAct) {
     ui.set_min_width(150.0);
     ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
     ui.spacing_mut().item_spacing.y = 2.0;
@@ -102,6 +106,9 @@ fn menu_items(ui: &mut egui::Ui, h: &Host, act: &mut CardAct) {
         items.push((Icon::Folder, "Open SFTP", CardAct::Sftp));
     }
     items.extend([(Icon::Pencil, "Edit", CardAct::Edit), (Icon::Copy, "Duplicate", CardAct::Duplicate), (pin_icon, pin, CardAct::Pin), (Icon::Trash, "Delete", CardAct::Delete)]);
+    for (i, m) in moves.iter().enumerate() {
+        items.insert(items.len() - 1, (Icon::Users, m.as_str(), CardAct::Move(i)));
+    }
     for (icon, text, a) in items {
         let clicked = if a == CardAct::Delete {
             // a soft red field marks the one item that destroys something
@@ -135,7 +142,7 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         p.rect_stroke(rect, 10.0, Stroke::new(1.5, BLUE()), StrokeKind::Inside);
     }
 
-    out.resp.context_menu(|ui| menu_items(ui, h, &mut act));
+    out.resp.context_menu(|ui| menu_items(ui, h, &c.moves, &mut act));
 
     // avatar
     let av = Rect::from_min_size(rect.min + Vec2::new(12.0, 12.0), Vec2::splat(40.0));
@@ -163,7 +170,7 @@ pub fn host_card(ui: &mut egui::Ui, width: f32, c: &HostCardIn) -> CardAct {
         let mut open = false;
         egui::Popup::menu(&more).gap(6.0).show(|ui| {
             open = true;
-            menu_items(ui, h, &mut act);
+            menu_items(ui, h, &c.moves, &mut act);
         });
         ui.ctx().data_mut(|d| d.insert_temp(menu_key, open));
         if h.protocol == Protocol::Ssh {
