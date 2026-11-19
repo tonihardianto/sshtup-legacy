@@ -39,6 +39,8 @@ pub struct SyncUi {
     pub team_name: String,
     pub member_email: String,
     pub member_team: i64,
+    /// the "Add member" field is open in the card of `member_team`
+    pub add_open: bool,
     /// the role the next person gets: "admin", "editor" or "viewer" (empty: editor)
     pub member_role: String,
     /// someone about to be added to a team: waits for the owner to confirm the fingerprint
@@ -53,6 +55,11 @@ pub struct SyncUi {
     pub confirm_remove: Option<(i64, i64, String)>,
     /// (team id, name) waiting for a yes before the team is deleted
     pub confirm_delete_team: Option<(i64, String)>,
+}
+
+/// What a "Move to ..." target is called inside the "Move to team" submenu: the team's name, or Personal.
+pub fn target_name(label: &str) -> &str {
+    label.strip_prefix("Move to team ").or_else(|| label.strip_prefix("Move to ")).unwrap_or(label)
 }
 
 /// The name shown for a role.
@@ -75,10 +82,46 @@ pub enum OpResult {
     Msg(String, bool),
     Devices(Vec<serde_json::Value>),
     Candidate(i64, sync_client::teams::MemberLookup),
+    /// the server can delete teams: start moving this team's items back to Personal
+    CloseTeam(i64),
 }
 
 fn field(ui: &mut egui::Ui, text: &mut String, hint: &str, password: bool) {
     ui.add(egui::TextEdit::singleline(text).password(password).hint_text(hint).desired_width(300.0).margin(Vec2::new(10.0, 8.0)));
+}
+
+/// The box each team (and the fingerprint) sits in.
+fn team_frame() -> egui::Frame {
+    egui::Frame::new().fill(CARD()).stroke(egui::Stroke::new(1.0, BORDER())).corner_radius(10).inner_margin(egui::Margin::symmetric(14, 12))
+}
+
+/// A thin line between rows of a team card.
+fn divider(ui: &mut egui::Ui) {
+    let w = ui.available_width();
+    let (r, _) = ui.allocate_exact_size(Vec2::new(w, 9.0), egui::Sense::hover());
+    ui.painter().hline(r.x_range(), r.center().y, egui::Stroke::new(1.0, BORDER()));
+}
+
+/// A small square button with only an icon; red on hover, the tip says what it does.
+fn icon_button(ui: &mut egui::Ui, icon: crate::icons::Icon, tip: &str) -> egui::Response {
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(28.0), egui::Sense::click());
+    let hot = resp.hovered();
+    if hot {
+        ui.painter().rect_filled(r, 6.0, HOVER());
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    crate::icons::paint(ui.painter(), r.center(), 14.0, icon, if hot { RED() } else { MUTED() });
+    resp.on_hover_text(tip)
+}
+
+/// An amber note with its buttons, for a step that needs a yes.
+fn warn_box(ui: &mut egui::Ui, text: &str, buttons: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new().fill(AMBER().linear_multiply(0.10)).stroke(egui::Stroke::new(1.0, AMBER().linear_multiply(0.45))).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(text).size(12.0).color(TEXT()));
+        ui.add_space(6.0);
+        ui.horizontal(buttons);
+    });
 }
 
 fn ago(ms: u64) -> String {
@@ -135,6 +178,10 @@ impl App {
                 OpResult::Msg(m, ok) => su.message = Some((m, ok)),
                 OpResult::Devices(d) => su.devices = Some(d),
                 OpResult::Candidate(t, v) => su.candidate = Some((t, v)),
+                OpResult::CloseTeam(t) => {
+                    self.close_team(t);
+                    su.message = None;
+                }
             }
         }
 
@@ -472,9 +519,8 @@ impl App {
         }
         ui.separator();
         icon_menu_button(ui, crate::icons::Icon::Users, "Move to team", |ui| {
-            ui.set_min_width(150.0);
             for (scope, label) in targets {
-                if ui.button(label.trim_start_matches("Move to ")).clicked() {
+                if submenu_item(ui, target_name(&label)).clicked() {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("move_req"), (kind.to_string(), id, scope)));
                     ui.close();
                 }
@@ -482,7 +528,6 @@ impl App {
         });
     }
 
-    /// Moves an item (or a whole group) to another vault. A secret that becomes readable by a team waits for a yes.
     /// Starts closing a team: every item in it moves back to Personal, and the team is deleted once the server has them.
     pub fn close_team(&mut self, team: i64) {
         let Some(cfg) = self.vault.sync.clone() else { return };
@@ -497,11 +542,12 @@ impl App {
         if self.cur_vault.as_deref() == Some(scope.as_str()) {
             self.cur_vault = None;
         }
-        self.sync_rt.delete_team_after = Some(team);
+        self.sync_rt.delete_team_after = Some((team, ids));
         self.sync_rt.want_now = true;
         self.dirty = true;
     }
 
+    /// Moves an item (or a whole group) to another vault. A secret that becomes readable by a team waits for a yes.
     pub fn move_item(&mut self, kind: &str, id: u64, scope: &str, confirmed: bool) {
         let Some(cfg) = self.vault.sync.clone() else { return };
         let item = super::state::item_id(kind, id);
@@ -655,177 +701,246 @@ impl App {
 
     fn sync_teams_ui(&mut self, ui: &mut egui::Ui, su: &mut SyncUi, cfg: &SyncConfig) {
         use sync_client::teams as tm;
-        ui.add_space(8.0);
-        ui.label(RichText::new("Teams").strong().size(12.5).color(TEXT()));
+        ui.add_space(14.0);
+        ui.label(RichText::new("Teams").strong().size(13.0).color(TEXT()));
+        ui.add_space(6.0);
         if let Some(xp) = from_hex32(&cfg.x_public) {
-            ui.label(RichText::new(format!("Your fingerprint: {}", tm::own_fingerprint(&xp))).monospace().size(11.5).color(MUTED()));
-            ui.label(RichText::new("The owner of a team sees this number when adding you. Read it to them (phone, chat) before they confirm.").size(11.5).color(MUTED()));
+            team_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(RichText::new("Your fingerprint").size(11.5).color(MUTED()));
+                ui.label(RichText::new(tm::own_fingerprint(&xp)).monospace().size(13.0).color(TEXT()));
+                ui.add_space(2.0);
+                ui.label(RichText::new("A team owner sees this number when adding you. Read it to them (phone, chat) before they confirm.").size(11.5).color(MUTED()));
+            });
+            ui.add_space(10.0);
         }
         let (server, token) = (cfg.server.clone(), cfg.token.clone());
         for t in self.sync_rt.teams.clone() {
-            ui.add_space(4.0);
-            ui.label(RichText::new(format!("Team {} — you are {}", t.name, role_name(&t.role))).size(12.5).color(TEXT()));
-            if !t.can_write() {
-                ui.label(RichText::new("As a viewer you can connect and read, but not add or change anything. The team's key lets you open every item, so treat it like any other member would.").size(11.5).color(MUTED()));
-            }
-            if !t.ready() {
-                ui.label(RichText::new(if t.owner { "The team key is being renewed after a removal." } else { "Waiting for the owner to renew the team key. Shared items are paused until then." }).size(11.5).color(AMBER()));
-            }
-            for m in &t.members {
+            team_frame().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                // header: badge, name, role and size, delete on the right
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("   {} — {}", m.email, m.fingerprint)).monospace().size(11.0).color(MUTED()));
-                    let can_edit_role = t.can_manage() && t.ready() && m.role != "owner" && !(m.role == "admin" && !t.owner);
-                    if can_edit_role {
-                        let mut pick = m.role.clone();
-                        egui::ComboBox::from_id_salt(("member_role", t.id, m.user_id)).width(80.0).selected_text(role_name(&m.role)).show_ui(ui, |ui| {
-                            for r in grantable(&t.role) {
-                                ui.selectable_value(&mut pick, r.to_string(), role_name(r));
-                            }
-                        });
-                        if pick != m.role && su.op.is_none() {
+                    let (b, _) = ui.allocate_exact_size(Vec2::splat(34.0), egui::Sense::hover());
+                    let initial = t.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "T".into());
+                    badge(ui.painter(), b, &initial, icon_color(&t.name.to_lowercase()));
+                    ui.add_space(4.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(1.0);
+                        ui.label(RichText::new(&t.name).strong().size(14.0).color(TEXT()));
+                        let n = t.members.len();
+                        ui.label(RichText::new(format!("You are {}  ·  {n} member{}", role_name(&t.role), if n == 1 { "" } else { "s" })).size(11.5).color(MUTED()));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let can_delete = t.owner && t.ready() && su.op.is_none() && self.sync_rt.delete_team_after.is_none();
+                        if can_delete && icon_button(ui, crate::icons::Icon::Trash, "Delete team").clicked() {
+                            su.confirm_delete_team = Some((t.id, t.name.clone()));
+                        }
+                    });
+                });
+                if self.sync_rt.delete_team_after.as_ref().map(|d| d.0) == Some(t.id) {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new().size(12.0));
+                        ui.label(RichText::new("Moving the items back to Personal, then deleting the team…").size(11.5).color(MUTED()));
+                    });
+                }
+                if !t.can_write() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("As a viewer you can connect and read, but not add or change anything. The team's key lets you open every item, so treat it like any other member would.").size(11.5).color(MUTED()));
+                }
+                if !t.ready() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(if t.owner { "The team key is being renewed after a removal." } else { "Waiting for the owner to renew the team key. Shared items are paused until then." }).size(11.5).color(AMBER()));
+                }
+                if let Some((tid, name)) = su.confirm_delete_team.clone().filter(|c| c.0 == t.id) {
+                    ui.add_space(8.0);
+                    warn_box(ui, &format!("Delete the team \"{name}\"? Every item in it goes back to your Personal vault. Other members lose the team and its items."), |ui| {
+                        if danger_button(ui, "Delete team").clicked() {
+                            su.confirm_delete_team = None;
+                            // ask the server first: an older one cannot delete teams, and then nothing should move
                             let (tx, rx) = channel();
                             su.op = Some(rx);
-                            let (s2, t2, tid, uid, email, role) = (server.clone(), token.clone(), t.id, m.user_id, m.email.clone(), pick);
-                            self.sync_rt.want_now = true;
+                            let (s2, t2) = (server.clone(), token.clone());
                             std::thread::spawn(move || {
-                                let _ = tx.send(match tm::set_role(&Api::new(&s2, Some(t2)), tid, uid, &role) {
-                                    Ok(()) => OpResult::Msg(format!("{email} is now {}.", role_name(&role).to_lowercase()), true),
+                                let _ = tx.send(match tm::can_delete_teams(&Api::new(&s2, Some(t2))) {
+                                    Ok(true) => OpResult::CloseTeam(tid),
+                                    Ok(false) => OpResult::Msg("This sync server cannot delete teams yet. Update it with deploy/update.sh, then try again.".into(), false),
                                     Err(e) => OpResult::Msg(e.to_string(), false),
                                 });
                             });
                         }
-                    } else {
-                        ui.label(RichText::new(role_name(&m.role)).size(11.0).color(MUTED()));
-                    }
-                    if t.owner && m.role != "owner" && t.ready() && t.stale_items == 0 && ui.add_enabled(su.op.is_none(), egui::Button::new("Remove").small()).clicked() {
-                        su.confirm_remove = Some((t.id, m.user_id, m.email.clone()));
-                    }
-                });
-            }
-            if t.owner && t.ready() && su.confirm_delete_team.is_none() && self.sync_rt.delete_team_after.is_none() && ui.add_enabled(su.op.is_none(), egui::Button::new("Delete team").small()).clicked() {
-                su.confirm_delete_team = Some((t.id, t.name.clone()));
-            }
-            if let Some((tid, name)) = su.confirm_delete_team.clone().filter(|c| c.0 == t.id) {
-                ui.label(RichText::new(format!("Delete the team \"{name}\"? Every item in it goes back to your Personal vault. Other members lose access to the team; items they already have stay on their computers as their own.")).size(12.0).color(AMBER()));
-                ui.horizontal(|ui| {
-                    if danger_button(ui, "Delete team").clicked() {
-                        su.confirm_delete_team = None;
-                        self.close_team(tid);
-                    }
-                    if flat_button(ui, "Cancel").clicked() {
-                        su.confirm_delete_team = None;
-                    }
-                });
-            }
-            if let Some((tid, uid, email)) = su.confirm_remove.clone().filter(|c| c.0 == t.id) {
-                ui.label(RichText::new(format!("Remove {email}? The team key is replaced and every shared item is sealed again, so they cannot read anything new. They keep what they already saw: change any password they could read.")).size(12.0).color(AMBER()));
-                ui.horizontal(|ui| {
-                    if danger_button(ui, "Remove and renew the key").clicked() {
-                        let (tx, rx) = channel();
-                        su.op = Some(rx);
-                        su.confirm_remove = None;
-                        let (s2, t2, tv, xs) = (server.clone(), token.clone(), t.clone(), from_hex32(&cfg.x_secret));
-                        self.sync_rt.want_now = true;
-                        std::thread::spawn(move || {
-                            let r = match xs {
-                                Some(xs) => tm::remove_member_and_rotate(&Api::new(&s2, Some(t2)), &tv, uid, &xs),
-                                None => Err(SyncError::Bad("the account key on this device is damaged".into())),
-                            };
-                            let _ = tx.send(match r {
-                                Ok(()) => OpResult::Msg(format!("{email} was removed and the team key was renewed."), true),
-                                Err(e) => OpResult::Msg(e.to_string(), false),
-                            });
-                        });
-                    }
-                    if flat_button(ui, "Cancel").clicked() {
-                        su.confirm_remove = None;
-                    }
-                });
-                let _ = tid;
-            }
-        }
-        // add a member
-        let owned: Vec<_> = self.sync_rt.teams.iter().filter(|t| t.can_manage() && t.key.is_some()).cloned().collect();
-        if !owned.is_empty() {
-            ui.add_space(4.0);
-            if !owned.iter().any(|t| t.id == su.member_team) {
-                su.member_team = owned[0].id;
-            }
-            egui::ComboBox::from_id_salt("invite_team").selected_text(owned.iter().find(|t| t.id == su.member_team).map(|t| t.name.clone()).unwrap_or_default()).show_ui(ui, |ui| {
-                for t in &owned {
-                    ui.selectable_value(&mut su.member_team, t.id, &t.name);
-                }
-            });
-            field(ui, &mut su.member_email, "Email of the person to add (they need an account on this server)", false);
-            if ui.add_enabled(su.op.is_none() && !su.member_email.trim().is_empty(), egui::Button::new("Look up")).clicked() {
-                let (tx, rx) = channel();
-                su.op = Some(rx);
-                let (s2, t2, team, email) = (server.clone(), token.clone(), su.member_team, su.member_email.clone());
-                std::thread::spawn(move || {
-                    let _ = tx.send(match tm::lookup(&Api::new(&s2, Some(t2)), team, &email) {
-                        Ok(v) => OpResult::Candidate(team, v),
-                        Err(e) => OpResult::Msg(e.to_string(), false),
+                        if flat_button(ui, "Cancel").clicked() {
+                            su.confirm_delete_team = None;
+                        }
                     });
-                });
-            }
-        }
-        if let Some((team, who)) = su.candidate.clone() {
-            ui.label(RichText::new(format!("{} has the fingerprint:", who.email)).size(12.0).color(TEXT()));
-            ui.label(RichText::new(&who.fingerprint).monospace().size(13.0).color(AMBER()));
-            ui.label(RichText::new("Ask them to read the number in their own Settings → Sync. Add them only if it is the same.").size(12.0).color(MUTED()));
-            let my_role = self.sync_rt.teams.iter().find(|t| t.id == team).map(|t| t.role.clone()).unwrap_or_default();
-            let options = grantable(&my_role);
-            if !options.contains(&su.member_role.as_str()) {
-                su.member_role = "editor".into();
-            }
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Role").size(12.0).color(MUTED()));
-                egui::ComboBox::from_id_salt("new_member_role").width(90.0).selected_text(role_name(&su.member_role)).show_ui(ui, |ui| {
-                    for r in options {
-                        ui.selectable_value(&mut su.member_role, r.to_string(), role_name(r));
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                if primary_button(ui, "The numbers match, add to the team").clicked() {
-                    let key = self.sync_rt.teams.iter().find(|t| t.id == team).and_then(|t| t.key.clone());
-                    if let Some(key) = key {
-                        let (tx, rx) = channel();
-                        su.op = Some(rx);
-                        let (s2, t2, who2, role) = (server.clone(), token.clone(), who.clone(), su.member_role.clone());
-                        std::thread::spawn(move || {
-                            let _ = tx.send(match tm::add_member(&Api::new(&s2, Some(t2)), team, &who2, &key, &role) {
-                                Ok(()) => OpResult::Msg(format!("{} is in the team. They get the key on their next sync.", who2.email), true),
-                                Err(e) => OpResult::Msg(e.to_string(), false),
-                            });
+                }
+                // members
+                ui.add_space(8.0);
+                for m in &t.members {
+                    divider(ui);
+                    ui.horizontal(|ui| {
+                        let (a, _) = ui.allocate_exact_size(Vec2::splat(30.0), egui::Sense::hover());
+                        avatar(ui.painter(), a.center(), 13.0, &m.email, icon_color(&m.email.to_lowercase()));
+                        ui.add_space(4.0);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&m.email).size(12.5).color(TEXT()));
+                            ui.label(RichText::new(&m.fingerprint).monospace().size(10.5).color(MUTED()));
                         });
-                        su.candidate = None;
-                        su.member_email.clear();
-                        self.sync_rt.want_now = true;
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if t.owner && m.role != "owner" && t.ready() && t.stale_items == 0 && su.op.is_none() && icon_button(ui, crate::icons::Icon::Close, "Remove from team").clicked() {
+                                su.confirm_remove = Some((t.id, m.user_id, m.email.clone()));
+                            }
+                            let can_edit_role = t.can_manage() && t.ready() && m.role != "owner" && !(m.role == "admin" && !t.owner);
+                            if can_edit_role {
+                                let mut pick = m.role.clone();
+                                egui::ComboBox::from_id_salt(("member_role", t.id, m.user_id)).width(84.0).selected_text(role_name(&m.role)).show_ui(ui, |ui| {
+                                    for r in grantable(&t.role) {
+                                        ui.selectable_value(&mut pick, r.to_string(), role_name(r));
+                                    }
+                                });
+                                if pick != m.role && su.op.is_none() {
+                                    let (tx, rx) = channel();
+                                    su.op = Some(rx);
+                                    let (s2, t2, tid, uid, email, role) = (server.clone(), token.clone(), t.id, m.user_id, m.email.clone(), pick);
+                                    self.sync_rt.want_now = true;
+                                    std::thread::spawn(move || {
+                                        let _ = tx.send(match tm::set_role(&Api::new(&s2, Some(t2)), tid, uid, &role) {
+                                            Ok(()) => OpResult::Msg(format!("{email} is now {}.", role_name(&role).to_lowercase()), true),
+                                            Err(e) => OpResult::Msg(e.to_string(), false),
+                                        });
+                                    });
+                                }
+                            } else {
+                                ui.label(RichText::new(role_name(&m.role)).size(12.0).color(MUTED()));
+                            }
+                        });
+                    });
+                    if let Some((_, uid, email)) = su.confirm_remove.clone().filter(|c| c.0 == t.id && c.1 == m.user_id) {
+                        ui.add_space(4.0);
+                        warn_box(ui, &format!("Remove {email}? The team key is replaced and every shared item is sealed again, so they cannot read anything new. They keep what they already saw: change any password they could read."), |ui| {
+                            if danger_button(ui, "Remove and renew the key").clicked() {
+                                let (tx, rx) = channel();
+                                su.op = Some(rx);
+                                su.confirm_remove = None;
+                                let (s2, t2, tv, xs) = (server.clone(), token.clone(), t.clone(), from_hex32(&cfg.x_secret));
+                                self.sync_rt.want_now = true;
+                                std::thread::spawn(move || {
+                                    let r = match xs {
+                                        Some(xs) => tm::remove_member_and_rotate(&Api::new(&s2, Some(t2)), &tv, uid, &xs),
+                                        None => Err(SyncError::Bad("the account key on this device is damaged".into())),
+                                    };
+                                    let _ = tx.send(match r {
+                                        Ok(()) => OpResult::Msg(format!("{email} was removed and the team key was renewed."), true),
+                                        Err(e) => OpResult::Msg(e.to_string(), false),
+                                    });
+                                });
+                            }
+                            if flat_button(ui, "Cancel").clicked() {
+                                su.confirm_remove = None;
+                            }
+                        });
                     }
                 }
-                if flat_button(ui, "Cancel").clicked() {
-                    su.candidate = None;
+                // add a member, inside the team it is for
+                if t.can_manage() && t.key.is_some() {
+                    divider(ui);
+                    ui.add_space(2.0);
+                    let open = su.add_open && su.member_team == t.id;
+                    if let Some((_, who)) = su.candidate.clone().filter(|c| c.0 == t.id) {
+                        self.member_candidate_ui(ui, su, &server, &token, t.id, &t.role, who);
+                    } else if open {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(&mut su.member_email).hint_text("Email (they need an account on this server)").desired_width((ui.available_width() - 170.0).max(160.0)).margin(Vec2::new(10.0, 8.0)));
+                            if ui.add_enabled(su.op.is_none() && !su.member_email.trim().is_empty(), egui::Button::new(RichText::new("Look up").size(12.5)).corner_radius(6).min_size(Vec2::new(0.0, 32.0))).clicked() {
+                                let (tx, rx) = channel();
+                                su.op = Some(rx);
+                                let (s2, t2, team, email) = (server.clone(), token.clone(), t.id, su.member_email.clone());
+                                std::thread::spawn(move || {
+                                    let _ = tx.send(match tm::lookup(&Api::new(&s2, Some(t2)), team, &email) {
+                                        Ok(v) => OpResult::Candidate(team, v),
+                                        Err(e) => OpResult::Msg(e.to_string(), false),
+                                    });
+                                });
+                            }
+                            if flat_button(ui, "Cancel").clicked() {
+                                su.add_open = false;
+                                su.member_email.clear();
+                            }
+                        });
+                    } else if icon_text_button(ui, crate::icons::Icon::User, "Add member").clicked() {
+                        su.add_open = true;
+                        su.member_team = t.id;
+                        su.member_email.clear();
+                        su.candidate = None;
+                    }
                 }
             });
+            ui.add_space(10.0);
         }
         // create
-        ui.add_space(4.0);
-        field(ui, &mut su.team_name, "New team name", false);
-        if ui.add_enabled(su.op.is_none() && !su.team_name.trim().is_empty(), egui::Button::new("Create team")).clicked() {
-            if let Some(xp) = from_hex32(&cfg.x_public) {
-                let (tx, rx) = channel();
-                su.op = Some(rx);
-                let (s2, t2, name) = (server.clone(), token.clone(), std::mem::take(&mut su.team_name));
-                self.sync_rt.want_now = true;
-                std::thread::spawn(move || {
-                    let _ = tx.send(match tm::create_team(&Api::new(&s2, Some(t2)), &xp, &name) {
-                        Ok(_) => OpResult::Msg(format!("Team \"{name}\" created."), true),
-                        Err(e) => OpResult::Msg(e.to_string(), false),
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut su.team_name).hint_text("New team name").desired_width(260.0).margin(Vec2::new(10.0, 8.0)));
+            if ui.add_enabled(su.op.is_none() && !su.team_name.trim().is_empty(), egui::Button::new(RichText::new("Create team").size(12.5)).corner_radius(6).min_size(Vec2::new(0.0, 32.0))).clicked() {
+                if let Some(xp) = from_hex32(&cfg.x_public) {
+                    let (tx, rx) = channel();
+                    su.op = Some(rx);
+                    let (s2, t2, name) = (server.clone(), token.clone(), std::mem::take(&mut su.team_name));
+                    self.sync_rt.want_now = true;
+                    std::thread::spawn(move || {
+                        let _ = tx.send(match tm::create_team(&Api::new(&s2, Some(t2)), &xp, &name) {
+                            Ok(_) => OpResult::Msg(format!("Team \"{name}\" created."), true),
+                            Err(e) => OpResult::Msg(e.to_string(), false),
+                        });
                     });
-                });
+                }
             }
+        });
+    }
+
+    /// The person found by "Look up": their fingerprint to compare, the role to give, and the final yes.
+    #[allow(clippy::too_many_arguments)]
+    fn member_candidate_ui(&mut self, ui: &mut egui::Ui, su: &mut SyncUi, server: &str, token: &str, team: i64, my_role: &str, who: sync_client::teams::MemberLookup) {
+        use sync_client::teams as tm;
+        ui.label(RichText::new(format!("{} has the fingerprint", who.email)).size(12.0).color(TEXT()));
+        ui.label(RichText::new(&who.fingerprint).monospace().size(13.0).color(AMBER()));
+        ui.label(RichText::new("Ask them to read the number in their own Settings → Sync. Add them only if it is the same.").size(11.5).color(MUTED()));
+        ui.add_space(4.0);
+        let options = grantable(my_role);
+        if !options.contains(&su.member_role.as_str()) {
+            su.member_role = "editor".into();
         }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Role").size(12.0).color(MUTED()));
+            egui::ComboBox::from_id_salt("new_member_role").width(90.0).selected_text(role_name(&su.member_role)).show_ui(ui, |ui| {
+                for r in options {
+                    ui.selectable_value(&mut su.member_role, r.to_string(), role_name(r));
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if primary_button(ui, "The numbers match, add").clicked() {
+                let key = self.sync_rt.teams.iter().find(|t| t.id == team).and_then(|t| t.key.clone());
+                if let Some(key) = key {
+                    let (tx, rx) = channel();
+                    su.op = Some(rx);
+                    let (s2, t2, who2, role) = (server.to_string(), token.to_string(), who.clone(), su.member_role.clone());
+                    std::thread::spawn(move || {
+                        let _ = tx.send(match tm::add_member(&Api::new(&s2, Some(t2)), team, &who2, &key, &role) {
+                            Ok(()) => OpResult::Msg(format!("{} is in the team. They get the key on their next sync.", who2.email), true),
+                            Err(e) => OpResult::Msg(e.to_string(), false),
+                        });
+                    });
+                    su.candidate = None;
+                    su.add_open = false;
+                    su.member_email.clear();
+                    self.sync_rt.want_now = true;
+                }
+            }
+            if flat_button(ui, "Cancel").clicked() {
+                su.candidate = None;
+            }
+        });
     }
 
     pub fn sync_sign_out(&mut self) {

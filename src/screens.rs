@@ -917,16 +917,15 @@ impl App {
         let targets = self.group_targets(kind, id);
         let top = self.vault.groups.iter().find(|g| g.id == id).map(|g| g.parent.is_some()).unwrap_or(false);
         icon_menu_button(ui, crate::icons::Icon::Group, "Move to group", |ui| {
-            ui.set_min_width(150.0);
             if targets.is_empty() && !top {
                 label_muted(ui, "No other groups");
             }
-            if top && ui.button("No group").clicked() {
+            if top && submenu_item(ui, "No group").clicked() {
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), (kind.to_string(), id, None::<u64>)));
                 ui.close();
             }
             for (gid, name) in targets {
-                if ui.button(name).clicked() {
+                if submenu_item(ui, &name).clicked() {
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("group_req"), (kind.to_string(), id, Some(gid))));
                     ui.close();
                 }

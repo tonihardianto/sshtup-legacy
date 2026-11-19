@@ -41,6 +41,8 @@ pub enum Icon {
     EyeOff,
     Alert,
     Lock,
+    Sync,
+    Info,
 }
 
 impl Icon {

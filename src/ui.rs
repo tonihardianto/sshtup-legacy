@@ -171,8 +171,20 @@ pub fn icon_text_button(ui: &mut egui::Ui, icon: crate::icons::Icon, text: &str)
 /// A submenu entry with a drawn icon on its left, lined up with `icon_text_button`.
 pub fn icon_menu_button<R>(ui: &mut egui::Ui, icon: crate::icons::Icon, text: &str, add: impl FnOnce(&mut egui::Ui) -> R) {
     ui.spacing_mut().button_padding = Vec2::new(12.0, 7.0);
-    let r = ui.menu_button(RichText::new(format!("       {text}")).size(12.5), add);
+    let r = ui.menu_button(RichText::new(format!("       {text}")).size(12.5), |ui| {
+        ui.spacing_mut().button_padding = Vec2::new(10.0, 6.0);
+        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.set_min_width(160.0);
+        ui.set_max_width(220.0);
+        add(ui)
+    });
     crate::icons::paint(ui.painter(), egui::Pos2::new(r.response.rect.left() + 20.0, r.response.rect.center().y), 14.0, icon, MUTED());
+}
+
+/// One entry in a submenu: full width, the same text size as the menu it came from.
+pub fn submenu_item(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    // the menu's layout stretches it to the submenu's width; asking for the available width here would widen the submenu
+    ui.add(egui::Button::new(RichText::new(text).size(12.5)).corner_radius(6).min_size(Vec2::new(0.0, 30.0)))
 }
 
 pub fn danger_button(ui: &mut egui::Ui, text: &str) -> egui::Response {

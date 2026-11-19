@@ -18,6 +18,7 @@ ICONS = [
     ("ChevUp", "chevron-up"), ("File", "file"), ("Users", "users"), ("Upload", "upload"), ("Copy", "copy"),
     ("Stop", "square"), ("FolderPlus", "folder-plus"), ("Pencil", "pencil"), ("Pin", "pin"), ("PinOff", "pin-off"), ("Trash", "trash"), ("Power", "power"), ("Sliders", "settings-2"), ("List", "list"),
     ("Download", "download"), ("Eye", "eye"), ("EyeOff", "eye-off"), ("Alert", "triangle-alert"), ("Lock", "lock"),
+    ("Sync", "refresh-cw"), ("Info", "info"),
 ]
 NS = "{http://www.w3.org/2000/svg}"
 

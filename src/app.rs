@@ -318,7 +318,7 @@ impl App {
             log_view: None,
             confirm: None,
             confirm_import: false,
-            settings_tab: 0,
+            settings_tab: 1,
             settings_query: String::new(),
             clear_armed: false,
             term_font,
@@ -966,7 +966,7 @@ ui.horizontal(|ui| {
                 for s in Screen::NAV {
                     if s == Screen::KnownHosts {
                         ui.add_space(10.0);
-                        ui.label(RichText::new("MORE").size(10.5).color(MUTED().linear_multiply(0.8)));
+                        ui.label(RichText::new("MORE").size(10.5).color(if crate::ui::is_light() { MUTED() } else { MUTED().linear_multiply(0.8) }));
                     }
                     self.nav_item(ui, s);
                 }
@@ -984,11 +984,18 @@ ui.horizontal(|ui| {
         } else if resp.hovered() {
             ui.painter().rect_filled(rect, 8.0, CARD());
         }
-        let col = if selected { TEXT() } else { MUTED() };
+        // the light sidebar is pale: darker text, drawn a touch heavier, keeps it readable
+        let light = crate::ui::is_light();
+        let col = if selected { TEXT() } else if light { Color32::from_rgb(0x3A, 0x3F, 0x55) } else { MUTED() };
         if let Some(ic) = crate::icons::Icon::parse(s.glyph()) {
             crate::icons::paint(ui.painter(), Pos2::new(rect.left() + 20.0, rect.center().y), 16.0, ic, col);
         }
-        ui.painter().text(Pos2::new(rect.left() + 40.0, rect.center().y), Align2::LEFT_CENTER, s.title(), FontId::proportional(13.5), col);
+        let at = Pos2::new(rect.left() + 40.0, rect.center().y);
+        ui.painter().text(at, Align2::LEFT_CENTER, s.title(), FontId::proportional(13.5), col);
+        if light {
+            // egui has no font weights: a second pass half a pixel over reads as medium weight
+            ui.painter().text(at + Vec2::new(0.45, 0.0), Align2::LEFT_CENTER, s.title(), FontId::proportional(13.5), col);
+        }
         if resp.clicked() {
             self.screen = s;
             self.editor = Editor::None;

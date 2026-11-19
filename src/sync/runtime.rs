@@ -108,7 +108,7 @@ pub struct SyncRuntime {
     /// the server no longer accepts this device: stop trying until the person signs in again
     pub stopped: bool,
     /// a team being closed: its items are moving back to Personal, and the team goes once the server has them
-    pub delete_team_after: Option<i64>,
+    pub delete_team_after: Option<(i64, Vec<String>)>,
     pub ui: super::ui::SyncUi,
 }
 
@@ -236,8 +236,8 @@ impl App {
                 }
                 state.cursors = out.cursors;
                 state.remember_replaced(&out.conflicts, now);
-                let all_sent = state.items.values().all(|t| t.synced);
-                let team_to_close = self.sync_rt.delete_team_after.filter(|_| all_sent && out.refused == 0);
+                // the team goes only once the server holds every item that was in it as a personal item
+                let team_to_close = self.sync_rt.delete_team_after.as_ref().filter(|(_, ids)| out.refused == 0 && ids.iter().all(|id| state.items.get(id).map(|t| t.synced && t.scope == "u").unwrap_or(true))).map(|(tid, _)| *tid);
                 if !state.save(log_key) {
                     self.sync_rt.last_error = Some("Could not save the sync state.".into());
                 } else {
@@ -269,6 +269,7 @@ impl App {
                     });
                 } else if self.sync_rt.delete_team_after.is_some() && out.refused > 0 {
                     self.sync_rt.delete_team_after = None;
+                    self.sync_rt.ui.message = Some(("The server refused some items, so the team was not deleted.".into(), false));
                     self.notify("The server refused some items, so the team was not deleted.".into(), crate::ui::AMBER());
                 }
                 if !out.conflicts.is_empty() {

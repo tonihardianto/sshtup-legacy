@@ -733,18 +733,22 @@ impl App {
         let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.0), Sense::hover());
         ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, BORDER()));
         let mut x = bar.left();
-        for (i, name) in ["Terminal", "General", "Security", "Sync", "About"].iter().enumerate() {
-            let on = self.settings_tab == i as u8 && !searching;
+        // shown in this order; the number is the page (kept stable: 0 is Terminal)
+        use crate::icons::Icon;
+        let tabs = [(1u8, "General", Icon::Sliders), (0, "Terminal", Icon::Terminal), (2, "Security", Icon::Lock), (3, "Sync", Icon::Sync), (4, "About", Icon::Info)];
+        for (i, name, icon) in tabs {
+            let on = self.settings_tab == i && !searching;
             let g = ui.painter().layout_no_wrap(name.to_string(), FontId::proportional(13.5), TEXT());
-            let r = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(g.size().x + 4.0, bar.height()));
+            let r = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(g.size().x + 26.0, bar.height()));
             let resp = ui.interact(r, egui::Id::new(("settings-tab", i)), Sense::click());
             let col = if on || resp.hovered() { TEXT() } else { MUTED() };
-            ui.painter().text(Pos2::new(r.left() + 2.0, r.center().y - 2.0), Align2::LEFT_CENTER, *name, FontId::proportional(13.5), col);
+            crate::icons::paint(ui.painter(), Pos2::new(r.left() + 9.0, r.center().y - 2.0), 15.0, icon, col);
+            ui.painter().text(Pos2::new(r.left() + 24.0, r.center().y - 2.0), Align2::LEFT_CENTER, name, FontId::proportional(13.5), col);
             if on {
                 ui.painter().rect_filled(Rect::from_min_max(Pos2::new(r.left(), bar.bottom() - 2.0), Pos2::new(r.right(), bar.bottom())), 1.0, BLUE());
             }
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                self.settings_tab = i as u8;
+                self.settings_tab = i;
                 query.clear();
                 self.clear_armed = false;
             }
