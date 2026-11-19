@@ -356,6 +356,35 @@ impl App {
     }
 
     /// "Pa|Team name" tag for the lists, empty for personal items.
+    /// The scope an item lives in: "u" (only me) or "t:<id>".
+    pub fn item_scope(&self, kind: &str, id: u64) -> String {
+        self.sync_rt.state.as_ref().and_then(|st| st.items.get(&super::state::item_id(kind, id))).map(|t| t.scope.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| "u".into())
+    }
+
+    /// Whether the item shows in the vault picked in the sidebar. Everything shows when no vault is picked.
+    pub fn in_vault(&self, kind: &str, id: u64) -> bool {
+        match &self.cur_vault {
+            None => true,
+            Some(v) => self.item_scope(kind, id) == *v,
+        }
+    }
+
+    /// Name of a vault scope for the sidebar and lists.
+    pub fn vault_name(&self, scope: &str) -> String {
+        match scope.strip_prefix("t:").and_then(|n| n.parse::<i64>().ok()) {
+            Some(t) => self.vault.sync.as_ref().and_then(|c| c.teams.iter().find(|x| x.id == t)).map(|x| x.name.clone()).unwrap_or_else(|| "Team".into()),
+            None => "Personal".into(),
+        }
+    }
+
+    /// Picks the vault the lists show (None: everything). Leaves any open group, which belongs to the old vault.
+    pub fn set_vault(&mut self, v: Option<String>) {
+        if self.cur_vault != v {
+            self.cur_vault = v;
+            self.cur_group = None;
+        }
+    }
+
     pub fn team_tag(&self, kind: &str, id: u64) -> String {
         let Some(st) = &self.sync_rt.state else { return String::new() };
         let Some(t) = st.items.get(&super::state::item_id(kind, id)) else { return String::new() };
@@ -383,7 +412,8 @@ impl App {
                 .and_then(|g| self.sync_rt.state.as_ref().and_then(|s| s.items.get(&super::state::item_id("group", g))))
                 .map(|t| t.scope.clone())
                 .filter(|s| s.starts_with("t:") && matches!(kind, "host" | "group"));
-            self.sync_rt.ui.new_scope = Some(inherited.unwrap_or_else(|| "u".into()));
+            let from_vault = self.cur_vault.clone().filter(|v| v.starts_with("t:") && cfg.teams.iter().any(|t| super::teams::scope_of(t.id) == *v && t.can_write()));
+            self.sync_rt.ui.new_scope = Some(inherited.or(from_vault).unwrap_or_else(|| "u".into()));
         }
         let cur = self.sync_rt.ui.new_scope.clone().unwrap_or_else(|| "u".into());
         let name_of = |scope: &str| -> String {

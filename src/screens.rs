@@ -834,13 +834,14 @@ impl App {
             .vault
             .hosts
             .iter()
+            .filter(|h| self.in_vault("host", h.id))
                         .filter(|h| if q.is_empty() { h.group == self.cur_group && !h.pinned } else { h.label.to_lowercase().contains(&q) || h.address.to_lowercase().contains(&q) || h.tags.iter().any(|t| t.to_lowercase().contains(&q)) })
             .cloned()
             .collect();
         sort(&mut hosts, &self.vault.settings.sort_by);
-        let mut pinned: Vec<Host> = if q.is_empty() { self.vault.hosts.iter().filter(|h| h.pinned).cloned().collect() } else { vec![] };
+        let mut pinned: Vec<Host> = if q.is_empty() { self.vault.hosts.iter().filter(|h| h.pinned && self.in_vault("host", h.id)).cloned().collect() } else { vec![] };
         sort(&mut pinned, &self.vault.settings.sort_by);
-        let groups: Vec<Group> = if q.is_empty() { self.vault.groups.iter().filter(|g| g.parent == self.cur_group).cloned().collect() } else { vec![] };
+        let groups: Vec<Group> = if q.is_empty() { self.vault.groups.iter().filter(|g| g.parent == self.cur_group && self.in_vault("group", g.id)).cloned().collect() } else { vec![] };
 
         if hosts.is_empty() && pinned.is_empty() && groups.is_empty() && !looks_quick {
             if self.vault.hosts.is_empty() && self.vault.groups.is_empty() {
@@ -1198,7 +1199,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(10.0);
             let w = ui.available_width().min(760.0) - 1.0;
-            for f in &self.vault.forwards {
+            for f in self.vault.forwards.iter().filter(|f| self.in_vault("forward", f.id)) {
                 let hl = self.host_label(f.host);
                 let live = self.forwards_live.contains_key(&f.id);
                 let (c, r) = item_card(ui, Vec2::new(w, 60.0), &f.display_label(&hl), &if f.label.is_empty() { f.kind.name().to_string() } else { f.describe(&hl) }, "icon:forward", icon_color(f.kind.name()), if live { Some(GREEN()) } else { None }, if live { "Stop" } else { "Start" }, 56.0, false);
@@ -1242,7 +1243,7 @@ impl App {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(10.0);
             let w = ui.available_width().min(760.0) - 1.0;
-            for s in &self.vault.snippets {
+            for s in self.vault.snippets.iter().filter(|s| self.in_vault("snippet", s.id)) {
                 let first = s.script.lines().next().unwrap_or("").to_string();
                 let (c, r) = item_card(ui, Vec2::new(w, 60.0), &s.display_label(), &format!("{}{}", first, self.team_tag("snippet", s.id)), "icon:snippet", icon_color(&s.label), None, "Run", 48.0, false);
                 if r.clicked() {

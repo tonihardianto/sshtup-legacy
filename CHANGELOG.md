@@ -9,6 +9,9 @@ All notable changes to SSHTUP. Versions are the tags of the
   a team's hosts but not change or delete its items; admins can add people and set editor/viewer roles; only the owner
   removes people or makes admins. People already in a team become editors. Update the sync server with
   `deploy/update.sh` first. See SYNC.md for what a role does and does not protect.
+- Teams: **vault switcher**. The tile at the top of the sidebar now opens a list of All vaults, Personal and each team,
+  and hosts, groups, forwards, snippets, keys and identities show only what is in the chosen vault. New items go to
+  the chosen team when you can edit it.
 
 ## 0.3.0
 
