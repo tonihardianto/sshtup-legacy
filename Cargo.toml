@@ -39,5 +39,5 @@ sync-server = { path = "sync-server" }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
 raw-window-handle = "0.6"
-objc2-app-kit = { version = "0.2", features = ["NSWindow", "NSView", "NSButton", "NSControl", "NSResponder", "NSApplication"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSView", "NSButton", "NSControl", "NSResponder", "NSApplication"] }
 objc2-foundation = { version = "0.2", features = ["NSGeometry"] }
